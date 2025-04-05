@@ -24,6 +24,11 @@ import kornia
 import torch.nn as nn
 import kornia.contrib as K
 
+"""
+This script runs registration on the entire training set and makes a registered set of training data. 
+Together, you can combine this with the test set registered (reg_B) to create a fully registered set of data to then train a GAN. 
+"""
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--epoch", type=int, default=0, help="epoch to load")
 parser.add_argument("--dataset_name", type=str, default="eurecom_warped_pairs", help="name of the dataset")
@@ -34,7 +39,7 @@ parser.add_argument("--experiment", type=str, default="tfcgan_stn", help="experi
 opt = parser.parse_args()
 
 
-os.makedirs("/home/local/AD/cordun1/experiments/TFC-GAN-STN/images/test_results/%s" % opt.experiment, exist_ok=True)
+os.makedirs("./images/test_results/%s_regtrain" % opt.experiment, exist_ok=True)
 cuda = True if torch.cuda.is_available() else False
 
 
@@ -282,13 +287,13 @@ generator2 = GeneratorUNet2(input_shape_patch).cuda() # for fake_A
 model = Net().cuda()
 
 
-g1_path = "/home/local/AD/cordun1/experiments/TFC-GAN-STN/saved_models/%s/generator1_%d.pth" % (opt.experiment, opt.epoch)
+g1_path = "./saved_models/%s/generator1_%d.pth" % (opt.experiment, opt.epoch)
 load_clean_state(generator1, g1_path)
 
-g2_path = "/home/local/AD/cordun1/experiments/TFC-GAN-STN/saved_models/%s/generator2_%d.pth" % (opt.experiment, opt.epoch)
+g2_path = "./saved_models/%s/generator2_%d.pth" % (opt.experiment, opt.epoch)
 load_clean_state(generator2, g2_path)
 
-stn_path = "/home/local/AD/cordun1/experiments/TFC-GAN-STN/saved_models/%s/stn_%d.pth" % (opt.experiment, opt.epoch)
+stn_path = "./saved_models/%s/stn_%d.pth" % (opt.experiment, opt.epoch)
 load_clean_state(model, stn_path)
 
 
@@ -302,13 +307,13 @@ transforms_ = [
     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
 ]
 
-test_dataloader = DataLoader(
-    TestImageDataset(root = "/home/local/AD/cordun1/experiments/data/%s" % opt.dataset_name,
-        transforms_=transforms_,
-        mode="test"),
-    batch_size=1,
-    shuffle=False,
-    num_workers=1,
+dataloader = DataLoader(
+    ImageDataset(root = "./data/%s" % opt.dataset_name,
+        transforms_=transforms_),
+    batch_size=1, # <- one at a time
+    shuffle=False, # <- set to false so that it will output in order
+    num_workers=8,
+    drop_last=False,
 )
 
 ##############################
@@ -329,7 +334,7 @@ At test time you use the regular FP32, not Half Tensor. That's only used during 
 
 """
 
-for i, batch in tqdm(enumerate(test_dataloader)):
+for i, batch in tqdm(enumerate(dataloader)):
     real_A = Variable(batch["A"].type(Tensor))
     real_B = Variable(batch["B"].type(Tensor))
     
@@ -343,4 +348,4 @@ for i, batch in tqdm(enumerate(test_dataloader)):
     
     # GLOBAL
     img_sample_global = torch.cat((real_A.data, real_B.data, warped_B.data, fake_A1.data, fake_B.data, fake_A2.data), -1)
-    save_image(img_sample_global, "images/test_results/%s/%s.png" % (opt.experiment, i), nrow=4, normalize=True)
+    save_image(img_sample_global, "images/test_results/%s_regtrain/%s.png" % (opt.experiment, i), nrow=4, normalize=True)

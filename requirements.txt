@@ -1,0 +1,17 @@
+# Core ML frameworks - Apple Silicon (M3) compatible versions
+torch==2.1.0
+torchvision==0.16.0
+
+# Image processing
+Pillow==10.4.0
+opencv-python==4.8.1.78
+kornia==0.4.1
+lpips==0.1.3
+antialiased-cnns==0.3
+
+# Utils
+numpy==1.24.4
+tqdm==4.50.2
+
+# Optional - for face mesh visualization
+# face-alignment==1.3.5 
