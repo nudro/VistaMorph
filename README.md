@@ -69,15 +69,16 @@ Paper links:
 
 ## Architecture Components
 
-### 1. UNET for STN
-The Spatial Transformer Network uses a U-Net architecture for localization:
-- Downsampling path with `UNetDownLoc`
-- Upsampling path with `UNetUpLoc`
-- Localization network implemented as `LocalizerUNet`
+### 1. Vision Transformer (ViT) for STN
+The Spatial Transformer Network uses a Vision Transformer architecture for localization:
+- Patch-based image processing (patch size 16 for 256x256 images)
+- Self-attention mechanism for capturing global dependencies
+- Transformer encoder with multi-head attention
+- Outputs deformation parameters for spatial transformation
 
 ### 2. Spatial Transformer Network (STN)
 The STN module (`Net` class) consists of:
-- A localization network (U-Net based)
+- A localization network (Vision Transformer based)
 - A fully connected layer for affine transformation parameters
 - Initialized with identity transformation bias
 - Processes concatenated input images to generate deformation fields
