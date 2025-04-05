@@ -526,93 +526,20 @@ Many deep learning approaches like Voxelmorph [13], integrate a spatial transfor
 
 ## Bibliography
 
-[13] @article{balakrishnan2019voxelmorph,
-  title={VoxelMorph: a learning framework for deformable medical image registration},
-  author={Balakrishnan, Guha and Zhao, Amy and Sabuncu, Mert R and Guttag, John and Dalca, Adrian V},
-  journal={IEEE transactions on medical imaging},
-  volume={38},
-  number={8},
-  pages={1788--1800},
-  year={2019},
-  publisher={IEEE}
-}
+[13] Balakrishnan, Guha, et al. "VoxelMorph: A Learning Framework for Deformable Medical Image Registration." IEEE Transactions on Medical Imaging, vol. 38, no. 8, 2019, pp. 1788-1800.
 
-[47] @article{de2019deep,
-  title={A deep learning framework for unsupervised affine and deformable image registration},
-  author={de Vos, Bob D and Berendsen, Floris F and Viergever, Max A and Sokooti, Hessam and Staring, Marius and I{\v{s}}gum, Ivana},
-  journal={Medical image analysis},
-  volume={52},
-  pages={128--143},
-  year={2019},
-  publisher={Elsevier}
-}
+[47] de Vos, Bob D., et al. "A Deep Learning Framework for Unsupervised Affine and Deformable Image Registration." Medical Image Analysis, vol. 52, 2019, pp. 128-143.
 
-[86] @article{fu2020deep,
-  title={Deep learning for medical image registration: A review},
-  author={Fu, Yabo and Lei, Yang and Wang, Tonghe and Curran, Walter J and Liu, Tian and Yang, Xiaofeng},
-  journal={Physics in Medicine \& Biology},
-  volume={65},
-  number={20},
-  pages={20TR01},
-  year={2020},
-  publisher={IOP Publishing}
-}
+[86] Fu, Yabo, et al. "Deep Learning for Medical Image Registration: A Review." Physics in Medicine & Biology, vol. 65, no. 20, 2020, pp. 20TR01.
 
-[105] @inproceedings{jaderberg2015spatial,
-  title={Spatial transformer networks},
-  author={Jaderberg, Max and Simonyan, Karen and Zisserman, Andrew and others},
-  booktitle={Advances in neural information processing systems},
-  volume={28},
-  year={2015}
-}
+[105] Jaderberg, Max, et al. "Spatial Transformer Networks." Advances in Neural Information Processing Systems, vol. 28, 2015.
 
-[141] @article{lu2020deep,
-  title={Deep learning and convolutional neural networks for medical image computing},
-  author={Lu, Le and Zheng, Yefeng and Carneiro, Gustavo and Yang, Lin},
-  journal={Medical Image Analysis},
-  volume={60},
-  pages={101699},
-  year={2020},
-  publisher={Elsevier}
-}
+[141] Lu, Le, et al. "Deep Learning and Convolutional Neural Networks for Medical Image Computing." Medical Image Analysis, vol. 60, 2020, pp. 101699.
 
-[215] @article{reddy2013survey,
-  title={A survey on image registration methods},
-  author={Reddy, B Srinivasa and Chatterji, B N},
-  journal={Indian Journal of Computer Science and Engineering},
-  volume={4},
-  number={2},
-  pages={130--152},
-  year={2013}
-}
+[215] Reddy, B. Srinivasa, and B. N. Chatterji. "A Survey on Image Registration Methods." Indian Journal of Computer Science and Engineering, vol. 4, no. 2, 2013, pp. 130-152.
 
-[216] @article{reddy1996fft,
-  title={FFT-based technique for translation, rotation, and scale-invariant image registration},
-  author={Reddy, BS and Chatterji, BN},
-  journal={IEEE transactions on image processing},
-  volume={5},
-  number={8},
-  pages={1266--1271},
-  year={1996},
-  publisher={IEEE}
-}
+[216] Reddy, B. S., and B. N. Chatterji. "FFT-Based Technique for Translation, Rotation, and Scale-Invariant Image Registration." IEEE Transactions on Image Processing, vol. 5, no. 8, 1996, pp. 1266-1271.
 
-[231] @article{sotiras2013deformable,
-  title={Deformable medical image registration: A survey},
-  author={Sotiras, Aristeidis and Davatzikos, Christos and Paragios, Nikos},
-  journal={IEEE transactions on medical imaging},
-  volume={32},
-  number={7},
-  pages={1153--1190},
-  year={2013},
-  publisher={IEEE}
-}
+[231] Sotiras, Aristeidis, et al. "Deformable Medical Image Registration: A Survey." IEEE Transactions on Medical Imaging, vol. 32, no. 7, 2013, pp. 1153-1190.
 
-[273] @inproceedings{xu2020adversarial,
-  title={Adversarial Uni-and Multi-modal Stream Networks for Multimodal Image Registration},
-  author={Xu, Zhe and others},
-  booktitle={International Conference on Medical Image Computing and Computer-Assisted Intervention},
-  pages={222--232},
-  year={2020},
-  organization={Springer}
-}
+[273] Xu, Zhe, et al. "Adversarial Uni-and Multi-modal Stream Networks for Multimodal Image Registration." International Conference on Medical Image Computing and Computer-Assisted Intervention, 2020, pp. 222-232.
