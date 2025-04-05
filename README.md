@@ -116,6 +116,13 @@ VistaMorph was evaluated on two visible-thermal face datasets:
 ### ARL DEVCOM Dataset
 - A 5% random sample of the complete dataset, used with permission
 - Contains time-synchronized visible and thermal facial images
+
+<div align="center">
+<img src="data/DEVCOM_5perc/train/SUBJ19c84414_e_2019-11-04_12-22-35-693.png" width="400" alt="Sample DEVCOM visible-thermal pair">
+<br>
+<em>Sample image pair from DEVCOM dataset showing visible and thermal face capture</em>
+</div>
+
 - Citation:
 ```bibtex
 @inproceedings{poster2021large,
@@ -128,6 +135,13 @@ VistaMorph was evaluated on two visible-thermal face datasets:
 
 ### Carl Dataset
 - Contains face images simultaneously captured in visible and thermal spectrums
+
+<div align="center">
+<img src="data/Carl_Final/train/19S4AR2.bmp" width="400" alt="Sample Carl visible-thermal pair">
+<br>
+<em>Sample image pair from Carl dataset showing visible and thermal face capture</em>
+</div>
+
 - Citation:
 ```bibtex
 @article{espinosa2013new,
