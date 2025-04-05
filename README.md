@@ -523,3 +523,96 @@ Image registration is a standard technique in computer vision, defined in the fo
 Reddy et al., describes three classes of conventional image registration models which are Fast Fourier Transform (FFT) algorithms, feature-based detectors like SIFT, or geometric models that steer rotation according to keypoints like ORB [216]. Recently, deep learning methods have been investigated to automatically register images by learning transformation parameters across images. For example, de Vos, et al., developed the Unsupervised Deep Learning Image Registration (DLIR), where registration can be performed in one pass using a multi-stage CNN that performs affine registration and deformable image registration in multiple phases [47]. DLIR predicts the transformation parameters which are used to calculate a dense displacement vector field. The field resamples the "moving" image into a similar "fixed" image matrix using Normalized Cross Correlation (NCC) as the similarity metric.
 
 Many deep learning approaches like Voxelmorph [13], integrate a spatial transformation network (STN)[105]. The goal of the STN is to predict transformation parameters by a localization network to create a sampling grid. This grid consists of coordinates used to guide how the input feature map is sampled. An affine transformation can then be applied to the sampled vector to generate the registered output. The localization network can be any neural network like a CNN. A limited number of works explore the concurrent application of image registration with image-to-image translation. In a recent survey by Lu et al., [141] the authors investigate the success of applying image-to-image translation towards the biomedical image registration task. Xu et al., translates moving CT scans to fixed MRI scans, and registers both images by learning their deformation fields, with the goal of fusing them into a fixed MRI image [273]. In this work, both the ground truth CT and MRI scans are available to learn at the time of prediction. This differs markedly from our task, where at inference, the ground truth thermal image is not available, and the translation model must learn solely from the given ground truth visible image.
+
+## Bibliography
+
+[13] @article{balakrishnan2019voxelmorph,
+  title={VoxelMorph: a learning framework for deformable medical image registration},
+  author={Balakrishnan, Guha and Zhao, Amy and Sabuncu, Mert R and Guttag, John and Dalca, Adrian V},
+  journal={IEEE transactions on medical imaging},
+  volume={38},
+  number={8},
+  pages={1788--1800},
+  year={2019},
+  publisher={IEEE}
+}
+
+[47] @article{de2019deep,
+  title={A deep learning framework for unsupervised affine and deformable image registration},
+  author={de Vos, Bob D and Berendsen, Floris F and Viergever, Max A and Sokooti, Hessam and Staring, Marius and I{\v{s}}gum, Ivana},
+  journal={Medical image analysis},
+  volume={52},
+  pages={128--143},
+  year={2019},
+  publisher={Elsevier}
+}
+
+[86] @article{fu2020deep,
+  title={Deep learning for medical image registration: A review},
+  author={Fu, Yabo and Lei, Yang and Wang, Tonghe and Curran, Walter J and Liu, Tian and Yang, Xiaofeng},
+  journal={Physics in Medicine \& Biology},
+  volume={65},
+  number={20},
+  pages={20TR01},
+  year={2020},
+  publisher={IOP Publishing}
+}
+
+[105] @inproceedings{jaderberg2015spatial,
+  title={Spatial transformer networks},
+  author={Jaderberg, Max and Simonyan, Karen and Zisserman, Andrew and others},
+  booktitle={Advances in neural information processing systems},
+  volume={28},
+  year={2015}
+}
+
+[141] @article{lu2020deep,
+  title={Deep learning and convolutional neural networks for medical image computing},
+  author={Lu, Le and Zheng, Yefeng and Carneiro, Gustavo and Yang, Lin},
+  journal={Medical Image Analysis},
+  volume={60},
+  pages={101699},
+  year={2020},
+  publisher={Elsevier}
+}
+
+[215] @article{reddy2013survey,
+  title={A survey on image registration methods},
+  author={Reddy, B Srinivasa and Chatterji, B N},
+  journal={Indian Journal of Computer Science and Engineering},
+  volume={4},
+  number={2},
+  pages={130--152},
+  year={2013}
+}
+
+[216] @article{reddy1996fft,
+  title={FFT-based technique for translation, rotation, and scale-invariant image registration},
+  author={Reddy, BS and Chatterji, BN},
+  journal={IEEE transactions on image processing},
+  volume={5},
+  number={8},
+  pages={1266--1271},
+  year={1996},
+  publisher={IEEE}
+}
+
+[231] @article{sotiras2013deformable,
+  title={Deformable medical image registration: A survey},
+  author={Sotiras, Aristeidis and Davatzikos, Christos and Paragios, Nikos},
+  journal={IEEE transactions on medical imaging},
+  volume={32},
+  number={7},
+  pages={1153--1190},
+  year={2013},
+  publisher={IEEE}
+}
+
+[273] @inproceedings{xu2020adversarial,
+  title={Adversarial Uni-and Multi-modal Stream Networks for Multimodal Image Registration},
+  author={Xu, Zhe and others},
+  booktitle={International Conference on Medical Image Computing and Computer-Assisted Intervention},
+  pages={222--232},
+  year={2020},
+  organization={Springer}
+}
