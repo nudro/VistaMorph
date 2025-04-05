@@ -18,7 +18,7 @@ If you use this code, please cite our paper:
 
 Paper links:
 - [arXiv PDF](https://arxiv.org/pdf/2306.06505)
-- [IEEE Conference Publication](https://ieeexplore.ieee.org/abstract/document/10298431)
+
 
 ## Visual Results
 
