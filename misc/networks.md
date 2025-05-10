@@ -7,14 +7,15 @@ This document outlines various architectural options for the `self.fc_loc` netwo
 - Output dimension: `3*2`
 - Final activation: `nn.Sigmoid()`
 - Intermediate layer size: `256`
+- Note: All architectures ensure that `self.fc_loc[2]` accesses a Linear layer for proper bias initialization
 
 ## 1. Simple Two-Layer Network
 ```python
 self.fc_loc = nn.Sequential(
     nn.Linear(1*17*768, 1024),
-    nn.ReLU(),
+    nn.ReLU(True),
     nn.Linear(1024, 256),
-    nn.ReLU(),
+    nn.ReLU(True),
     nn.Linear(256, 3*2),
     nn.Sigmoid()
 )
@@ -24,13 +25,12 @@ self.fc_loc = nn.Sequential(
 ```python
 self.fc_loc = nn.Sequential(
     nn.Linear(1*17*768, 1024),
-    nn.ReLU(),
-    nn.Dropout(0.2),
+    nn.ReLU(True),
     nn.Linear(1024, 512),
-    nn.ReLU(),
+    nn.ReLU(True),
     nn.Dropout(0.2),
     nn.Linear(512, 256),
-    nn.ReLU(),
+    nn.ReLU(True),
     nn.Linear(256, 3*2),
     nn.Sigmoid()
 )
@@ -39,13 +39,13 @@ self.fc_loc = nn.Sequential(
 ## 3. Network with Batch Normalization
 ```python
 self.fc_loc = nn.Sequential(
-    nn.Linear(1*17*768, 1024, bias=True),
+    nn.Linear(1*17*768, 1024),
+    nn.ReLU(True),
     nn.BatchNorm1d(1024),
-    nn.ReLU(),
-    nn.Linear(1024, 256, bias=True),
+    nn.Linear(1024, 256),
+    nn.ReLU(True),
     nn.BatchNorm1d(256),
-    nn.ReLU(),
-    nn.Linear(256, 3*2, bias=True),
+    nn.Linear(256, 3*2),
     nn.Sigmoid()
 )
 ```
@@ -57,7 +57,7 @@ class ResidualBlock(nn.Module):
         super(ResidualBlock, self).__init__()
         self.block = nn.Sequential(
             nn.Linear(in_features, in_features),
-            nn.ReLU(),
+            nn.ReLU(True),
             nn.Linear(in_features, in_features)
         )
     
@@ -66,10 +66,10 @@ class ResidualBlock(nn.Module):
 
 self.fc_loc = nn.Sequential(
     nn.Linear(1*17*768, 1024),
-    nn.ReLU(),
-    ResidualBlock(1024),
+    nn.ReLU(True),
     nn.Linear(1024, 256),
-    nn.ReLU(),
+    nn.ReLU(True),
+    ResidualBlock(256),
     nn.Linear(256, 3*2),
     nn.Sigmoid()
 )
@@ -79,14 +79,13 @@ self.fc_loc = nn.Sequential(
 ```python
 self.fc_loc = nn.Sequential(
     nn.Linear(1*17*768, 1024),
+    nn.ReLU(True),
     nn.LayerNorm(1024),
-    nn.LeakyReLU(0.2),
     nn.Linear(1024, 512),
+    nn.ReLU(True),
     nn.LayerNorm(512),
-    nn.LeakyReLU(0.2),
     nn.Linear(512, 256),
-    nn.LayerNorm(256),
-    nn.LeakyReLU(0.2),
+    nn.ReLU(True),
     nn.Linear(256, 3*2),
     nn.Sigmoid()
 )
@@ -96,11 +95,13 @@ self.fc_loc = nn.Sequential(
 ```python
 self.fc_loc = nn.Sequential(
     nn.Linear(1*17*768, 1024),
+    nn.ReLU(True),
     nn.GELU(),
     nn.Linear(1024, 512),
+    nn.ReLU(True),
     nn.GELU(),
     nn.Linear(512, 256),
-    nn.GELU(),
+    nn.ReLU(True),
     nn.Linear(256, 3*2),
     nn.Sigmoid()
 )
@@ -111,21 +112,23 @@ self.fc_loc = nn.Sequential(
 class SkipConnection(nn.Module):
     def __init__(self, in_features, out_features):
         super(SkipConnection, self).__init__()
-        self.skip = nn.Linear(in_features, out_features, bias=True)
+        self.skip = nn.Linear(in_features, out_features)
         self.main = nn.Sequential(
-            nn.Linear(in_features, out_features, bias=True),
-            nn.ReLU(),
-            nn.Linear(out_features, out_features, bias=True)
+            nn.Linear(in_features, out_features),
+            nn.ReLU(True),
+            nn.Linear(out_features, out_features)
         )
     
     def forward(self, x):
         return self.skip(x) + self.main(x)
 
 self.fc_loc = nn.Sequential(
-    nn.Linear(1*17*768, 1024, bias=True),
-    nn.ReLU(),
-    SkipConnection(1024, 256),
-    nn.Linear(256, 3*2, bias=True),
+    nn.Linear(1*17*768, 1024),
+    nn.ReLU(True),
+    nn.Linear(1024, 256),
+    nn.ReLU(True),
+    SkipConnection(256, 256),
+    nn.Linear(256, 3*2),
     nn.Sigmoid()
 )
 ```
@@ -149,5 +152,10 @@ Each architecture maintains the required input and output dimensions while offer
 - Regularization (Dropout)
 - Connection patterns (Residual, Skip connections)
 
-## Note on Bias Parameters
-For options 3 and 7, we explicitly set `bias=True` in the Linear layers to ensure proper initialization and avoid the "ReLU object has no attribute 'bias'" error. This is particularly important when using BatchNorm1d and Skip Connections. 
+## Note on Layer Ordering
+All architectures are structured to ensure that:
+1. Linear layers are properly positioned for bias access
+2. Activation functions (ReLU, GELU) come after Linear layers
+3. Normalization layers (BatchNorm, LayerNorm) come after activations
+4. The final layer is always a Linear layer followed by Sigmoid
+This structure ensures compatibility with bias initialization code like `self.fc_loc[2].bias.data.zero_()`. 
