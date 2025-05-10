@@ -39,13 +39,13 @@ self.fc_loc = nn.Sequential(
 ## 3. Network with Batch Normalization
 ```python
 self.fc_loc = nn.Sequential(
-    nn.Linear(1*17*768, 1024),
+    nn.Linear(1*17*768, 1024, bias=True),
     nn.BatchNorm1d(1024),
     nn.ReLU(),
-    nn.Linear(1024, 256),
+    nn.Linear(1024, 256, bias=True),
     nn.BatchNorm1d(256),
     nn.ReLU(),
-    nn.Linear(256, 3*2),
+    nn.Linear(256, 3*2, bias=True),
     nn.Sigmoid()
 )
 ```
@@ -111,21 +111,21 @@ self.fc_loc = nn.Sequential(
 class SkipConnection(nn.Module):
     def __init__(self, in_features, out_features):
         super(SkipConnection, self).__init__()
-        self.skip = nn.Linear(in_features, out_features)
+        self.skip = nn.Linear(in_features, out_features, bias=True)
         self.main = nn.Sequential(
-            nn.Linear(in_features, out_features),
+            nn.Linear(in_features, out_features, bias=True),
             nn.ReLU(),
-            nn.Linear(out_features, out_features)
+            nn.Linear(out_features, out_features, bias=True)
         )
     
     def forward(self, x):
         return self.skip(x) + self.main(x)
 
 self.fc_loc = nn.Sequential(
-    nn.Linear(1*17*768, 1024),
+    nn.Linear(1*17*768, 1024, bias=True),
     nn.ReLU(),
     SkipConnection(1024, 256),
-    nn.Linear(256, 3*2),
+    nn.Linear(256, 3*2, bias=True),
     nn.Sigmoid()
 )
 ```
@@ -147,4 +147,7 @@ Each architecture maintains the required input and output dimensions while offer
 - Activation functions (ReLU, LeakyReLU, GELU)
 - Normalization techniques (BatchNorm, LayerNorm)
 - Regularization (Dropout)
-- Connection patterns (Residual, Skip connections) 
+- Connection patterns (Residual, Skip connections)
+
+## Note on Bias Parameters
+For options 3 and 7, we explicitly set `bias=True` in the Linear layers to ensure proper initialization and avoid the "ReLU object has no attribute 'bias'" error. This is particularly important when using BatchNorm1d and Skip Connections. 
