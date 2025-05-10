@@ -18,7 +18,7 @@ import cv2
 from torch.cuda.amp import GradScaler, autocast
 from tqdm import tqdm
 import antialiased_cnns
-from datasets_stn import * 
+from VistaMorph.misc.datasets_stn_with_labels import * 
 import kornia
 import kornia.contrib as K
 
