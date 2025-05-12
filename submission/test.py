@@ -281,57 +281,93 @@ class TiffImageDataset(Dataset):
     def __init__(self, root, transforms_=None, mode="test"):
         self.transform = transforms.Compose(transforms_)
         self.mode = mode
-        self.files = sorted([os.path.join(root, file) for file in os.listdir(root) if file.endswith('.tiff')])
+        
+        # Define paths for optical and SAR directories
+        self.optical_dir = os.path.join(root, "optical")
+        self.sar_dir = os.path.join(root, "sar")
+        
+        # Verify directories exist
+        if not os.path.exists(self.optical_dir):
+            raise ValueError(f"Optical directory not found: {self.optical_dir}")
+        if not os.path.exists(self.sar_dir):
+            raise ValueError(f"SAR directory not found: {self.sar_dir}")
+        
+        # Get matching optical and SAR files
+        self.optical_files = sorted([f for f in os.listdir(self.optical_dir) if f.endswith('.tiff')])
+        self.sar_files = sorted([f for f in os.listdir(self.sar_dir) if f.endswith('.tiff')])
+        
+        # Verify we have matching files
+        if len(self.optical_files) != len(self.sar_files):
+            raise ValueError(f"Number of optical files ({len(self.optical_files)}) does not match number of SAR files ({len(self.sar_files)})")
+        
         self.patches = []
         self.patch_to_file = []  # Maps patch index to file index
         
         # Pre-process all files to get patches
-        for file_idx, file_path in enumerate(self.files):
+        for file_idx, (opt_file, sar_file) in enumerate(zip(self.optical_files, self.sar_files)):
             try:
-                with rasterio.open(file_path) as src:
-                    img = src.read()  # Read all bands
-                    img = np.transpose(img, (1, 2, 0))  # Change to HWC format
-                    
-                # Get patches for this file
-                file_patches = self.chip_image(img)
-                self.patches.extend(file_patches)
-                self.patch_to_file.extend([file_idx] * len(file_patches))
+                # Read optical image
+                opt_path = os.path.join(self.optical_dir, opt_file)
+                with rasterio.open(opt_path) as opt_src:
+                    opt_img = opt_src.read()  # Read all bands
+                    opt_img = np.transpose(opt_img, (1, 2, 0))  # Change to HWC format
+                
+                # Read SAR image
+                sar_path = os.path.join(self.sar_dir, sar_file)
+                with rasterio.open(sar_path) as sar_src:
+                    sar_img = sar_src.read()  # Read all bands
+                    sar_img = np.transpose(sar_img, (1, 2, 0))  # Change to HWC format
+                
+                # Verify images have same dimensions
+                if opt_img.shape != sar_img.shape:
+                    raise ValueError(f"Image dimensions don't match for pair {file_idx}: optical {opt_img.shape} vs SAR {sar_img.shape}")
+                
+                # Get patches for this pair
+                opt_patches, sar_patches = self.chip_image_pair(opt_img, sar_img)
+                self.patches.extend(list(zip(opt_patches, sar_patches)))
+                self.patch_to_file.extend([file_idx] * len(opt_patches))
+                
             except Exception as e:
-                print(f"Error processing file {file_path}: {str(e)}")
+                logger.error(f"Error processing file pair {file_idx}: {str(e)}")
                 continue
-        
-    def chip_image(self, img, size=256):
-        """Chip a large image into 256x256 patches"""
-        h, w = img.shape[:2]
-        patches = []
+    
+    def chip_image_pair(self, opt_img, sar_img, size=256):
+        """Chip both optical and SAR images into 256x256 patches"""
+        h, w = opt_img.shape[:2]
+        opt_patches = []
+        sar_patches = []
         
         for i in range(0, h, size):
             for j in range(0, w, size):
                 if i + size <= h and j + size <= w:
-                    patch = img[i:i+size, j:j+size]
-                    patches.append(patch)
+                    opt_patch = opt_img[i:i+size, j:j+size]
+                    sar_patch = sar_img[i:i+size, j:j+size]
+                    opt_patches.append(opt_patch)
+                    sar_patches.append(sar_patch)
         
-        return patches
+        return opt_patches, sar_patches
 
     def __getitem__(self, index):
-        # Get the patch
-        patch = self.patches[index]
+        # Get the patch pair
+        opt_patch, sar_patch = self.patches[index]
         
-        # Convert to PIL Image
-        patch = Image.fromarray(patch)
+        # Convert to PIL Images
+        opt_patch = Image.fromarray(opt_patch)
+        sar_patch = Image.fromarray(sar_patch)
         
         # Apply transforms
         if self.transform:
-            patch = self.transform(patch)
+            opt_patch = self.transform(opt_patch)
+            sar_patch = self.transform(sar_patch)
         
         # Create a sample with dummy Y (affine matrix) since we don't have ground truth
         dummy_Y = torch.eye(2, 3)  # Identity matrix as placeholder
         
         return {
-            "A": patch,
-            "B": patch,  # Same image for both A and B in inference
+            "A": opt_patch,  # Optical image
+            "B": sar_patch,  # SAR image
             "Y": dummy_Y,
-            "file_idx": self.patch_to_file[index]  # Keep track of which file this patch came from
+            "file_idx": self.patch_to_file[index]  # Keep track of which file pair this patch came from
         }
 
     def __len__(self):
