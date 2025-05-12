@@ -496,13 +496,14 @@ def feature_matching_loss(keypoints_A, keypoints_B, theta):
     loss = 0
     
     for b in range(batch_size):
-        # Get top K keypoints with non-maximum suppression
+        # Get top K keypoints without non-maximum suppression
         kp_A = keypoints_A[b].view(-1)
         kp_B = keypoints_B[b].view(-1)
         
-        # Apply non-maximum suppression
-        scores_A, idx_A = nms(kp_A)
-        scores_B, idx_B = nms(kp_B)
+        # Select top K keypoints directly
+        k = 100
+        scores_A, idx_A = torch.topk(kp_A, k=min(k, kp_A.numel()))
+        scores_B, idx_B = torch.topk(kp_B, k=min(k, kp_B.numel()))
         
         # Convert to 2D coordinates with proper scaling
         h, w = keypoints_A.size(2), keypoints_A.size(3)
