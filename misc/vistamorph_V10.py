@@ -269,22 +269,17 @@ def sample_images(batches_done):
     fake_A1 = generator2(warped_B)
     edge_fake_A1 = edge_detection(fake_A1)
     
-    # Denormalize images
-    def denormalize(x):
-        return (x + 1) / 2.0
-    
-    # Take only the first sample from each batch
-    real_A_denorm = denormalize(real_A.data[0:1])  # Keep batch dimension
-    real_B_denorm = denormalize(real_B.data[0:1])
-    warped_B_denorm = denormalize(warped_B.data[0:1])
-    fake_A1_denorm = denormalize(fake_A1.data[0:1])
-    edge_A_denorm = denormalize(edge_A.data[0:1])
-    edge_fake_A1_denorm = denormalize(edge_fake_A1.data[0:1])
+    # Take only the first sample from each batch and ensure 3 channels
+    real_A = real_A[0:1]  # [1, 3, H, W]
+    real_B = real_B[0:1]  # [1, 3, H, W]
+    warped_B = warped_B[0:1]  # [1, 3, H, W]
+    fake_A1 = fake_A1[0:1]  # [1, 3, H, W]
+    edge_fake_A1 = edge_fake_A1.expand(-1, 3, -1, -1)[0:1]  # [1, 3, H, W]
     
     # Stack images
     img_sample_global = torch.cat((
-        real_A_denorm, real_B_denorm, warped_B_denorm, 
-        fake_A1_denorm, edge_A_denorm, edge_fake_A1_denorm
+        real_A, real_B, warped_B, 
+        fake_A1, edge_fake_A1
     ), -1)
     
     # Save with proper normalization
