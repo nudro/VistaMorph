@@ -65,6 +65,18 @@ class LocalizerVIT(nn.Module):
 # Adopted from https://pytorch.org/tutorials/intermediate/spatial_transformer_tutorial.html
 ####################################################################
 
+class SkipConnection(nn.Module):
+    def __init__(self, in_features, out_features):
+        super(SkipConnection, self).__init__()
+        self.skip = nn.Linear(in_features, out_features)
+        self.main = nn.Sequential(
+            nn.Linear(in_features, out_features),
+            nn.ReLU(True),
+            nn.Linear(out_features, out_features)
+        )
+    
+    def forward(self, x):
+        return self.skip(x) + self.main(x)
 
 class Net(nn.Module):
     def __init__(self):
@@ -73,15 +85,14 @@ class Net(nn.Module):
         self.localization = LocalizerVIT(input_shape)
         self.theta_emb = nn.Linear(1, opt.img_height * opt.img_width)
 
-        # nn.Linear(1*257*768, 1024), # (hard-coded in, 257, 768 based on ViT output)
         self.fc_loc = nn.Sequential(
             nn.Linear(1*17*768, 1024),
             nn.ReLU(True),
-            nn.Linear(1024, 512), # Added more layers, will this stop the affine warp?
+            nn.Linear(1024, 256),
             nn.ReLU(True),
-            nn.Linear(512, 256),
-            nn.Sigmoid(), # <--- SIGMOID will this force the matrix values between [-1,+1]
-            nn.Linear(256, 3*2))
+            SkipConnection(256, 256),
+            nn.Linear(256, 3*2),
+            nn.Sigmoid())
         self.fc_loc[2].bias.data.zero_() # DO NOT CHANGE!
 
     def stn_phi(self, x):
@@ -99,11 +110,11 @@ class Net(nn.Module):
             dtheta = self.stn_phi(img_input)
             identity_theta = torch.tensor(identity_matrix, dtype=torch.float).cuda()
             dtheta = dtheta.reshape(img_A.size(0), 2*3)
-            theta = dtheta + identity_theta.unsqueeze(0).repeat(img_A.size(0),1)
+            dtheta = dtheta + identity_theta.unsqueeze(0).repeat(img_A.size(0),1)
 
             # get each theta for the batch
             theta_batches = []
-            for t in theta:
+            for t in dtheta:
                 this_theta = (t.view(-1, 2, 3)).reshape(1,2,3)
                 theta_batches.append(this_theta)
 
@@ -122,7 +133,7 @@ class Net(nn.Module):
                 Rs = F.grid_sample(src_tensors[i], rs_grid,  mode='bicubic', padding_mode='border', align_corners=True)
                 warped.append(Rs.type(HalfTensor))
 
-        return torch.cat(warped), theta  # Now returning both the warped image and the affine matrix
+        return torch.cat(warped)
 
 ##############################
 # 2 Generators
@@ -329,17 +340,14 @@ for i, batch in tqdm(enumerate(test_dataloader)):
     
     with torch.no_grad(): 
         fake_B = generator1(real_A)
-        warped_B, theta = net(img_A=real_A, img_B=fake_B, src=real_B) 
-        fake_A = generator2(warped_B)
-        
-        # Save the predicted affine matrix
-        theta_np = theta.cpu().numpy()
-        # Format: a b tx c d ty 0 0 1
-        formatted_theta = f"{theta_np[0][0]:.6f} {theta_np[0][1]:.6f} {theta_np[0][2]:.6f} {theta_np[0][3]:.6f} {theta_np[0][4]:.6f} {theta_np[0][5]:.6f} 0 0 1"
-        with open(f"./images/test_results/{opt.experiment}/predicted_theta_{i:05d}.txt", "w") as f:
-            f.write(formatted_theta)
+        fake_A1 = generator2(real_B)
+
+        # pass to generator 2 for fake_A
+        warped_B = net(img_A=real_A, img_B=fake_A1, src=real_B)
+        fake_A2 = generator2(warped_B)  
+
     
     # GLOBAL
-    img_sample_global = torch.cat((real_A.data, real_B.data, warped_B.data, fake_A.data, fake_B.data), -1)
+    img_sample_global = torch.cat((real_A.data, real_B.data, warped_B.data, fake_A1.data, fake_A1.data, fake_B.data), -1)
     save_image(img_sample_global, "./images/test_results/%s/%s.png" % (opt.experiment, i), nrow=4, normalize=True)
 

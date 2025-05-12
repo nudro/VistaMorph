@@ -18,38 +18,14 @@ from lpips import LPIPS
 from torch.distributed import Backend
 from torch.cuda.amp import GradScaler, autocast
 import antialiased_cnns
-from datasets_stn import * # only A and B
+from datasets_stn_with_labels import * # only A and B
 import kornia
 from lpips import LPIPS
 from kornia import morphology as morph
 import kornia.contrib as K
 
 
-"""
-# Removes fake_A2
-
-Official Implementation of "VISTA-MORPH: UNSUPERVISED IMAGE REGISTRATION
-OF VISIBLE-THERMAL FACIAL PAIRS" (https://arxiv.org/pdf/2306.06505.pdf)
-
-Quick Algorithm Overview:
-
-Losses are: Loss_GAN + alpha2*recon_loss + perc_loss + morph_loss
-
-fake_B = G1(A)
-fake_A = G2(B)
-warped_B = model(A, fake_A, real_B)
-L1(A,fake_A)
-LPIPS(A, fake_A) + LPIPS(B, fake_B)
-morph_triplet(warped_B, real_A, real_B)
-Use a ViT 64 patch size for STN localization network
-
-Sigmoid on ViT MLP to push values -1,+1
-A->G1->fake_B,A --> phi(real_B) ~ sample -> real_B^ [registered] -> G2 -> fake_A <---> [L1] with real_A
-
-If you are working with dark/no-light thermal pairs, then try the vistamorph_with_fft.py
-This includes a Fourier Transform Loss as mentioned in the paper
-
-"""
+# SkipConnection Network
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--epoch", type=int, default=0, help="epoch to start training from")
@@ -89,7 +65,8 @@ criterion_lpips = LPIPS(
 )
 
 criterion_L1 = nn.L1Loss()
-criterion_morph = nn.TripletMarginLoss(margin=1.0, p=2)
+#criterion_morph = nn.TripletMarginLoss(margin=1.0, p=2)
+criterion_MSE = nn.MSELoss()  # For tie point loss
 
 ############################
 #  Utils
@@ -123,7 +100,7 @@ def sample_images(batches_done):
     fake_B = generator1(real_A)
     fake_A1 = generator2(real_B)
     # pass to generator 2 for fake_A
-    warped_B = model(img_A=real_A, img_B=fake_A1, src=real_B)
+    warped_B, _ = model(img_A=real_A, img_B=fake_A1, src=real_B)
     img_sample_global = torch.cat((real_A.data, real_B.data, warped_B.data, fake_A1.data, fake_B.data), -1)
     save_image(img_sample_global, "./images/%s/%s.png" % (opt.experiment, batches_done), nrow=4, normalize=True)
 
@@ -155,6 +132,21 @@ class LocalizerVIT(nn.Module):
 # Adopted from https://pytorch.org/tutorials/intermediate/spatial_transformer_tutorial.html
 ####################################################################
 
+class SkipConnection(nn.Module):
+    def __init__(self, in_features, out_features):
+        super(SkipConnection, self).__init__()
+        self.skip = nn.Linear(in_features, out_features)
+        self.main = nn.Sequential(
+            nn.Linear(in_features, out_features),
+            nn.ReLU(True),
+            nn.Linear(out_features, out_features)
+        )
+    
+    def forward(self, x):
+        return self.skip(x) + self.main(x)
+
+
+
 
 class Net(nn.Module):
     def __init__(self):
@@ -163,6 +155,7 @@ class Net(nn.Module):
         self.localization = LocalizerVIT(input_shape)
         self.theta_emb = nn.Linear(1, opt.img_height * opt.img_width)
 
+        """
         # nn.Linear(1*257*768, 1024), # (hard-coded in, 257, 768 based on ViT output)
         self.fc_loc = nn.Sequential(
             nn.Linear(1*17*768, 1024),
@@ -173,6 +166,18 @@ class Net(nn.Module):
             nn.Sigmoid(), # <--- SIGMOID will this force the matrix values between [-1,+1]
             nn.Linear(256, 3*2))
         self.fc_loc[2].bias.data.zero_() # DO NOT CHANGE!
+        """
+
+        self.fc_loc = nn.Sequential(
+            nn.Linear(1*17*768, 1024),
+            nn.ReLU(True),
+            nn.Linear(1024, 256),
+            nn.ReLU(True),
+            SkipConnection(256, 256),
+            nn.Linear(256, 3*2),
+            nn.Sigmoid())
+        self.fc_loc[2].bias.data.zero_() # DO NOT CHANGE!
+
 
     def stn_phi(self, x):
         xs = self.localization(x) # (A,B), 6 ch
@@ -189,11 +194,11 @@ class Net(nn.Module):
             dtheta = self.stn_phi(img_input)
             identity_theta = torch.tensor(identity_matrix, dtype=torch.float).cuda()
             dtheta = dtheta.reshape(img_A.size(0), 2*3)
-            dtheta = dtheta + identity_theta.unsqueeze(0).repeat(img_A.size(0),1)
+            theta = dtheta + identity_theta.unsqueeze(0).repeat(img_A.size(0),1)
 
             # get each theta for the batch
             theta_batches = []
-            for t in dtheta:
+            for t in theta:
                 this_theta = (t.view(-1, 2, 3)).reshape(1,2,3)
                 theta_batches.append(this_theta)
 
@@ -212,7 +217,7 @@ class Net(nn.Module):
                 Rs = F.grid_sample(src_tensors[i], rs_grid,  mode='bicubic', padding_mode='border', align_corners=True)
                 warped.append(Rs.type(HalfTensor))
 
-        return torch.cat(warped)
+        return torch.cat(warped), theta  # Now returning both the warped image and the affine matrix
 
 ##############################
 # 2 Generators
@@ -471,7 +476,8 @@ if cuda:
     criterion_GAN.cuda()
     criterion_lpips.cuda()
     criterion_L1.cuda()
-    criterion_morph.cuda()
+    #criterion_morph.cuda()
+    criterion_MSE.cuda()
 
 # Trained on multigpus - change your device ids if needed
 generator1 = torch.nn.DataParallel(generator1, device_ids=[0,1])
@@ -517,7 +523,8 @@ transforms_ = [
 
 dataloader = DataLoader(
     ImageDataset(root = "./data/%s" % opt.dataset_name,
-        transforms_=transforms_),
+        transforms_=transforms_,
+        mode="train"),
     batch_size=opt.batch_size,
     shuffle=True,
     num_workers=opt.n_cpu,
@@ -547,6 +554,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
     for i, batch in enumerate(dataloader):
         real_A = Variable(batch["A"].type(HalfTensor))
         real_B = Variable(batch["B"].type(HalfTensor))
+        Y = Variable(batch["Y"].type(HalfTensor))  # Ground truth affine matrix
 
         # Adversarial ground truths
         valid_ones = Variable(HalfTensor(np.ones((real_A.size(0), *patch))), requires_grad=False)
@@ -565,32 +573,32 @@ for epoch in range(opt.epoch, opt.n_epochs):
             fake_A1 = generator2(real_B)
 
             # pass to generator 2 for fake_A
-            warped_B = model(img_A=real_A, img_B=fake_A1, src=real_B)
-            #fake_A2 = generator2(warped_B)  # don't detach, otherwise, the G won't get updates
+            warped_B, theta = model(img_A=real_A, img_B=fake_A1, src=real_B)
+            fake_A2 = generator2(warped_B)  # don't detach, otherwise, the G won't get updates
 
             # min recon loss / you need this b/c w/o it, the visible and thermal do not look similar to reals
-            #recon_loss = global_pixel_loss(fake_A2, real_A)  # L1
-            recon_loss = global_pixel_loss(fake_A1, real_A) 
+            recon_loss = global_pixel_loss(fake_A2, real_A)
 
             # perceptual loss / this is just making it look nice but ^^ recon is responsible for identity and fidelity
-            #perc_A = criterion_lpips(fake_A2, real_A)
-            perc_A = criterion_lpips(fake_A1, real_A)
+            perc_A = criterion_lpips(fake_A2, real_A)
             perc_B = criterion_lpips(fake_B, real_B)
             perc_loss = (perc_A + perc_B).mean()
 
             # triplet morph loss / all cast into same gradient modality of RGB
-            morph_loss = morph_triplet(real_A, real_B, warped_B)
+            #morph_loss = morph_triplet(real_A, real_B, warped_B)
 
             # Adverarial - How fake and how real
             loss_GAN1 = global_gen_loss(real_A, real_B, fake_B, mode='B')
-            #loss_GAN2 = global_gen_loss(real_A, real_B, fake_A2, mode='A')
-            loss_GAN2 = global_gen_loss(real_A, real_B, fake_A1, mode='A')
+            loss_GAN2 = global_gen_loss(real_A, real_B, fake_A2, mode='A')
             loss_GAN = (loss_GAN1 + loss_GAN2).mean()
 
+            # Tie point loss - MSE between predicted and ground truth affine matrices
+            tie_loss = criterion_MSE(theta, Y)
+
             # Total Loss
-            alpha1 = 0.001
-            alpha2 = 0.01
-            loss_G = loss_GAN + alpha2*recon_loss + perc_loss + morph_loss
+            alpha1 = 0.10
+            alpha2 = 0.50
+            loss_G = loss_GAN + alpha1*recon_loss + perc_loss + alpha2*tie_loss
 
         scaler.scale(loss_G).backward()
         scaler.step(optimizer_G)
@@ -605,8 +613,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
         with autocast():
 
             loss_D1 = global_disc_loss(real_A, real_B, fake_img=fake_B, mode='B')
-            #loss_D2 = global_disc_loss(real_A, real_B, fake_img=fake_A2, mode='A') # fake_A2
-            loss_D2 = global_disc_loss(real_A, real_B, fake_img=fake_A1, mode='A') 
+            loss_D2 = global_disc_loss(real_A, real_B, fake_img=fake_A2, mode='A')
             loss_D = 0.5*(loss_D1 + loss_D2)
 
         scaler.scale(loss_D).backward()
@@ -626,7 +633,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
         # Print log
         sys.stdout.write(
-            "\r[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f, R: %f, M: %f, P: %f] ETA: %s"
+            "\r[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f, R: %f, P: %f, T: %f] ETA: %s"
             % (
                 epoch, #%d
                 opt.n_epochs, #%d
@@ -635,14 +642,15 @@ for epoch in range(opt.epoch, opt.n_epochs):
                 loss_D.item(), #%f
                 loss_G.item(), #%f - total G loss
                 recon_loss.item(),
-                morph_loss.item(),
+                #morph_loss.item(),
                 perc_loss.item(),
+                tie_loss.item(),
                 time_left, #%s
             )
         )
 
         f.write(
-            "\r[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f, R:%f, M: %f, P: %f] ETA: %s"
+            "\r[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f, R:%f, P: %f, T: %f] ETA: %s"
             % (
                 epoch, #%d
                 opt.n_epochs, #%d
@@ -651,8 +659,9 @@ for epoch in range(opt.epoch, opt.n_epochs):
                 loss_D.item(), #%f
                 loss_G.item(), #%f - total G loss
                 recon_loss.item(),
-                morph_loss.item(),
+                #morph_loss.item(),
                 perc_loss.item(),
+                tie_loss.item(),
                 time_left, #%s
             )
         )
