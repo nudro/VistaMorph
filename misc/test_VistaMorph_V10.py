@@ -104,7 +104,10 @@ class LocalizerVIT(nn.Module):
 
     def forward(self, x):
         with autocast():
+            # Get ViT output [batch, 17, 768]
             out = self.vit(x).type(HalfTensor)
+            # Reshape to match expected dimensions
+            out = out.view(out.size(0), 1, 17, 768)
             print("out Vit:", out.size())
         return out
 
@@ -138,8 +141,8 @@ class Net(nn.Module):
         )
         
     def stn_phi(self, x):
-        xs = self.localization(x)
-        xs = xs.view(-1, 1 * xs.size(1) * xs.size(2))
+        xs = self.localization(x)  # [batch, 1, 17, 768]
+        xs = xs.view(-1, 1 * xs.size(2) * xs.size(3))  # [batch, 17*768]
         theta = self.fusion(xs)
         theta = theta.view(-1, 2, 3)
         return theta
