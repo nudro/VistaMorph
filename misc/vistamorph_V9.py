@@ -272,9 +272,25 @@ def sample_images(batches_done):
     keypoints_A_vis = keypoints_A_vis.expand(-1, 3, -1, -1)
     keypoints_B_vis = keypoints_B_vis.expand(-1, 3, -1, -1)
     
-    img_sample_global = torch.cat((real_A.data, real_B.data, warped_B.data, fake_A1.data, fake_B.data, 
-                                 keypoints_A_vis.data, keypoints_B_vis.data), -1)
-    save_image(img_sample_global, "./images/%s/%s.png" % (opt.experiment, batches_done), nrow=4, normalize=True)
+    # Denormalize images
+    def denormalize(x):
+        return (x + 1) / 2.0
+    
+    real_A_denorm = denormalize(real_A.data)
+    real_B_denorm = denormalize(real_B.data)
+    warped_B_denorm = denormalize(warped_B.data)
+    fake_A1_denorm = denormalize(fake_A1.data)
+    fake_B_denorm = denormalize(fake_B.data)
+    
+    # Stack images
+    img_sample_global = torch.cat((
+        real_A_denorm, real_B_denorm, warped_B_denorm, 
+        fake_A1_denorm, fake_B_denorm,
+        keypoints_A_vis.data, keypoints_B_vis.data
+    ), -1)
+    
+    # Save with proper normalization
+    save_image(img_sample_global, "./images/%s/%s.png" % (opt.experiment, batches_done), nrow=4, normalize=False)
 
 
 ##########################
@@ -465,24 +481,48 @@ def feature_matching_loss(keypoints_A, keypoints_B, theta):
     loss = 0
     
     for b in range(batch_size):
-        # Get top K keypoints
+        # Get top K keypoints with non-maximum suppression
         kp_A = keypoints_A[b].view(-1)
         kp_B = keypoints_B[b].view(-1)
         
-        # Get top K locations
-        _, idx_A = torch.topk(kp_A, k=100)
-        _, idx_B = torch.topk(kp_B, k=100)
+        # Apply non-maximum suppression to avoid selecting nearby points
+        def nms(keypoints, k=100, threshold=0.1):
+            scores, indices = torch.topk(keypoints, k=k)
+            # Convert to 2D coordinates
+            h, w = keypoints_A.size(2), keypoints_A.size(3)
+            y = indices // w
+            x = indices % w
+            
+            # Remove points that are too close to each other
+            coords = torch.stack([x.float(), y.float()], dim=1)
+            dist_matrix = torch.cdist(coords, coords)
+            mask = torch.ones_like(scores, dtype=torch.bool)
+            
+            for i in range(len(scores)):
+                if mask[i]:
+                    # Mark points that are too close as invalid
+                    mask[dist_matrix[i] < threshold] = False
+                    mask[i] = True  # Keep the current point
+            
+            return scores[mask], indices[mask]
         
-        # Convert to 2D coordinates
+        # Apply NMS to both sets of keypoints
+        scores_A, idx_A = nms(kp_A)
+        scores_B, idx_B = nms(kp_B)
+        
+        # Convert to 2D coordinates with proper scaling
         h, w = keypoints_A.size(2), keypoints_A.size(3)
-        y_A = idx_A // w
-        x_A = idx_A % w
-        y_B = idx_B // w
-        x_B = idx_B % w
+        scale_h = opt.img_height / h
+        scale_w = opt.img_width / w
+        
+        y_A = (idx_A // w).float() * scale_h
+        x_A = (idx_A % w).float() * scale_w
+        y_B = (idx_B // w).float() * scale_h
+        x_B = (idx_B % w).float() * scale_w
         
         # Stack coordinates
-        coords_A = torch.stack([x_A.float(), y_A.float()], dim=1)
-        coords_B = torch.stack([x_B.float(), y_B.float()], dim=1)
+        coords_A = torch.stack([x_A, y_A], dim=1)
+        coords_B = torch.stack([x_B, y_B], dim=1)
         
         # Apply transformation to A coordinates
         theta_b = theta[b].view(2, 3)
@@ -493,7 +533,14 @@ def feature_matching_loss(keypoints_A, keypoints_B, theta):
         # Calculate distance between transformed points and B points
         dist = torch.cdist(transformed_A, coords_B)
         min_dist, _ = torch.min(dist, dim=1)
-        loss += min_dist.mean()
+        
+        # Add confidence weighting
+        confidence = scores_A * scores_B
+        weighted_loss = (min_dist * confidence).mean()
+        
+        # Normalize by image size
+        normalized_loss = weighted_loss / (opt.img_height * opt.img_width)
+        loss += normalized_loss
     
     return loss / batch_size
     
@@ -536,7 +583,7 @@ def global_disc_loss(real_A, real_B, fake_img, mode):
 #Resizing happens in the ImageDataset() to 256 x 256 so that I can get patches (datasets_stn.py)
 transforms_ = [
     transforms.ToTensor(),
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),  # Normalize to [-1, 1]
 ]
 
 dataloader = DataLoader(
