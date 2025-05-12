@@ -43,7 +43,36 @@ from lpips import LPIPS
 from kornia import morphology as morph
 import kornia.contrib as K
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--epoch", type=int, default=0, help="epoch to start training from")
+parser.add_argument("--n_epochs", type=int, default=210, help="number of epochs of training")
+parser.add_argument("--dataset_name", type=str, default="eurecom_warped_pairs", help="name of the dataset")
+parser.add_argument("--batch_size", type=int, default=12, help="size of the batches")
+parser.add_argument("--lr", type=float, default=1e-4, help="adam: learning rate")
+parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
+parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
+parser.add_argument("--n_cpu", type=int, default=8, help="number of cpu threads to use during batch generation")
+parser.add_argument("--img_height", type=int, default=256, help="size of image height")
+parser.add_argument("--img_width", type=int, default=256, help="size of image width")
+parser.add_argument("--channels", type=int, default=3, help="number of image channels")
+parser.add_argument("--sample_interval", type=int, default=50, help="interval between sampling of images from generators")
+parser.add_argument("--checkpoint_interval", type=int, default=50, help="interval between model checkpoints")
+parser.add_argument("--gpu_num", type=int, default=0, help="gpu card")
+parser.add_argument("--experiment", type=str, default="tfcgan_stn_arar", help="experiment name")
+opt = parser.parse_args()
+
+os.makedirs("./images/%s" % opt.experiment, exist_ok=True)
+os.makedirs("./saved_models/%s" % opt.experiment, exist_ok=True)
+os.makedirs("./LOGS/%s" % opt.experiment, exist_ok=True)
+
+cuda = True if torch.cuda.is_available() else False
+torch.cuda.set_device(opt.gpu_num)
+torch.manual_seed(42)
+
+######################
 # Feature Extraction Network
+######################
+
 class FeatureExtractor(nn.Module):
     def __init__(self, in_channels=3):
         super(FeatureExtractor, self).__init__()
@@ -86,7 +115,41 @@ class FeatureExtractor(nn.Module):
         
         return keypoints, descriptors
 
+######################
 # Modified STN to incorporate feature information
+######################
+
+class ResidualBlock(nn.Module):
+    def __init__(self, in_features):
+        super(ResidualBlock, self).__init__()
+        self.block = nn.Sequential(
+            nn.Linear(in_features, in_features),
+            nn.ReLU(True),
+            nn.Linear(in_features, in_features)
+        )
+    
+    def forward(self, x):
+        return x + self.block(x)
+
+
+class LocalizerVIT(nn.Module):
+    def __init__(self, img_shape):
+        super(LocalizerVIT, self).__init__()
+        channels, self.h, self.w = img_shape
+        self.vit = nn.Sequential(
+            K.VisionTransformer(image_size=self.h, patch_size=64, in_channels=channels*2) # (A,B), changed from 16-> 32 patch
+        )
+
+    def forward(self, x):
+        # if you try different patch sizes, adjust tensors
+        # patch 16: torch.Size([batch, 257, 768])
+        # patch 32: torch.Size([batch, 65, 768])
+        # patch 64: torch.Size([batch, 17, 768])
+        with autocast():
+            out = self.vit(x).type(HalfTensor) # returns at patch_size = 16, torch.Size([batch, 257, 768])
+            print("out Vit:", out.size())
+        return out
+        
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
@@ -153,44 +216,7 @@ class Net(nn.Module):
 
         return torch.cat(warped), theta, keypoints_A, keypoints_B
 
-# Feature matching loss
-def feature_matching_loss(keypoints_A, keypoints_B, theta):
-    # Convert keypoints to coordinates
-    batch_size = keypoints_A.size(0)
-    loss = 0
-    
-    for b in range(batch_size):
-        # Get top K keypoints
-        kp_A = keypoints_A[b].view(-1)
-        kp_B = keypoints_B[b].view(-1)
-        
-        # Get top K locations
-        _, idx_A = torch.topk(kp_A, k=100)
-        _, idx_B = torch.topk(kp_B, k=100)
-        
-        # Convert to 2D coordinates
-        h, w = keypoints_A.size(2), keypoints_A.size(3)
-        y_A = idx_A // w
-        x_A = idx_A % w
-        y_B = idx_B // w
-        x_B = idx_B % w
-        
-        # Stack coordinates
-        coords_A = torch.stack([x_A.float(), y_A.float()], dim=1)
-        coords_B = torch.stack([x_B.float(), y_B.float()], dim=1)
-        
-        # Apply transformation to A coordinates
-        theta_b = theta[b].view(2, 3)
-        ones = torch.ones(coords_A.size(0), 1).cuda()
-        coords_A_homo = torch.cat([coords_A, ones], dim=1)
-        transformed_A = torch.mm(coords_A_homo, theta_b.t())
-        
-        # Calculate distance between transformed points and B points
-        dist = torch.cdist(transformed_A, coords_B)
-        min_dist, _ = torch.min(dist, dim=1)
-        loss += min_dist.mean()
-    
-    return loss / batch_size
+
 
 ##########################
 # Loss functions
@@ -245,6 +271,11 @@ def sample_images(batches_done):
     img_sample_global = torch.cat((real_A.data, real_B.data, warped_B.data, fake_A1.data, fake_B.data, 
                                  keypoints_A_vis.data, keypoints_B_vis.data), -1)
     save_image(img_sample_global, "./images/%s/%s.png" % (opt.experiment, batches_done), nrow=4, normalize=True)
+
+
+##########################
+# GENERATORS
+##########################
 
 class UNetDown(nn.Module):
     def __init__(self, in_size, out_size, normalize=True, dropout=0.0):
@@ -420,6 +451,48 @@ class Discriminator2(nn.Module):
             output = self.model(d_in)
         return output.type(HalfTensor)
 
+#################
+# LOSSES
+#################
+
+def feature_matching_loss(keypoints_A, keypoints_B, theta):
+    # Convert keypoints to coordinates
+    batch_size = keypoints_A.size(0)
+    loss = 0
+    
+    for b in range(batch_size):
+        # Get top K keypoints
+        kp_A = keypoints_A[b].view(-1)
+        kp_B = keypoints_B[b].view(-1)
+        
+        # Get top K locations
+        _, idx_A = torch.topk(kp_A, k=100)
+        _, idx_B = torch.topk(kp_B, k=100)
+        
+        # Convert to 2D coordinates
+        h, w = keypoints_A.size(2), keypoints_A.size(3)
+        y_A = idx_A // w
+        x_A = idx_A % w
+        y_B = idx_B // w
+        x_B = idx_B % w
+        
+        # Stack coordinates
+        coords_A = torch.stack([x_A.float(), y_A.float()], dim=1)
+        coords_B = torch.stack([x_B.float(), y_B.float()], dim=1)
+        
+        # Apply transformation to A coordinates
+        theta_b = theta[b].view(2, 3)
+        ones = torch.ones(coords_A.size(0), 1).cuda()
+        coords_A_homo = torch.cat([coords_A, ones], dim=1)
+        transformed_A = torch.mm(coords_A_homo, theta_b.t())
+        
+        # Calculate distance between transformed points and B points
+        dist = torch.cdist(transformed_A, coords_B)
+        min_dist, _ = torch.min(dist, dim=1)
+        loss += min_dist.mean()
+    
+    return loss / batch_size
+    
 def global_pixel_loss(real_B, fake_B):
     loss_pix = criterion_L1(fake_B, real_B)
     return loss_pix
@@ -451,6 +524,93 @@ def global_disc_loss(real_A, real_B, fake_img, mode):
         loss_D = 0.25*(loss_real + loss_fake)
 
     return loss_D
+
+##############################
+# Transforms and Dataloaders
+##############################
+
+#Resizing happens in the ImageDataset() to 256 x 256 so that I can get patches (datasets_stn.py)
+transforms_ = [
+    transforms.ToTensor(),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+]
+
+dataloader = DataLoader(
+    ImageDataset(root = "./data/%s" % opt.dataset_name,
+        transforms_=transforms_,
+        mode="train"),
+    batch_size=opt.batch_size,
+    shuffle=True,
+    num_workers=opt.n_cpu,
+    drop_last=True,
+)
+
+test_dataloader = DataLoader(
+    TestImageDataset(root = "./data/%s" % opt.dataset_name,
+        transforms_=transforms_,
+        mode="test"),
+    batch_size=1,
+    shuffle=True,
+    num_workers=1,
+)
+
+
+# ===========================================================
+# Initialize generator and discriminator
+# ===========================================================
+input_shape_patch = (opt.channels, opt.img_height, opt.img_width)
+generator1 = GeneratorUNet1(input_shape_patch) # for fake_B
+generator2 = GeneratorUNet2(input_shape_patch) # for fake_A
+discriminator1 = Discriminator1(input_shape_patch) # for fake_B
+discriminator2 = Discriminator2(input_shape_patch) # for fake_A
+
+if cuda:
+    generator1 = generator1.cuda()
+    generator2 = generator2.cuda()
+    discriminator1 = discriminator1.cuda()
+    discriminator2 = discriminator2.cuda()
+    model = Net().cuda()
+    #FeatureExtractor = FeatureExtractor.cuda()
+
+    criterion_GAN.cuda()
+    criterion_lpips.cuda()
+    criterion_L1.cuda()
+    criterion_MSE.cuda()
+
+# Trained on multigpus - change your device ids if needed
+generator1 = torch.nn.DataParallel(generator1, device_ids=[0,1])
+generator2 = torch.nn.DataParallel(generator2, device_ids=[0,1])
+discriminator1 = torch.nn.DataParallel(discriminator1, device_ids=[0,1])
+discriminator2 = torch.nn.DataParallel(discriminator2, device_ids=[0,1])
+model = torch.nn.DataParallel(model, device_ids=[0,1])
+#FeatureExtractor = torch.nn.DataParallel(model, device_ids=[0,1])
+
+
+if opt.epoch != 0:
+    # Load pretrained models
+    generator1.load_state_dict(torch.load("./saved_models/%s/generator1_%d.pth" % (opt.experiment, opt.epoch)))
+    generator2.load_state_dict(torch.load("./saved_models/%s/generator2_%d.pth" % (opt.experiment, opt.epoch)))
+    discriminator1.load_state_dict(torch.load("./saved_models/%s/discriminator1_%d.pth" % (opt.experiment, opt.epoch)))
+    discriminator2.load_state_dict(torch.load("./saved_models/%s/discriminator2_%d.pth" % (opt.experiment, opt.epoch)))
+    model.load_state_dict(torch.load("./saved_models/%s/stn_%d.pth" % (opt.experiment, opt.epoch)))
+    #FeatureExtractor.load_state_dict(torch.load("./saved_models/%s/fe_%d.pth" % (opt.experiment, opt.epoch)))
+
+else:
+    # Initialize weights
+    generator1.apply(weights_init_normal)
+    generator2.apply(weights_init_normal)
+    discriminator1.apply(weights_init_normal)
+    discriminator2.apply(weights_init_normal)
+    model.apply(weights_init_normal)
+    #FeatureExtractor.apply(weights_init_normal)
+
+# Optimizers - Jointly train generators and STN
+optimizer_G = torch.optim.Adam(itertools.chain(generator1.parameters(), generator2.parameters(), model.parameters()), lr=opt.lr, betas=(opt.b1, opt.b2))
+optimizer_D = torch.optim.Adam(itertools.chain(discriminator1.parameters(), discriminator2.parameters()), lr=opt.lr, betas=(opt.b1, opt.b2))
+
+# Tensor type - only use HalfTensor in this AMP script
+Tensor = torch.cuda.FloatTensor if cuda else torch.Tensor
+HalfTensor = torch.cuda.HalfTensor if cuda else torch.HalfTensor
 
 ##############################
 #       Training
@@ -602,3 +762,6 @@ for epoch in range(opt.epoch, opt.n_epochs):
         torch.save(discriminator1.state_dict(), "./saved_models/%s/discriminator1_%d.pth" % (opt.experiment, epoch))
         torch.save(discriminator2.state_dict(), "./saved_models/%s/discriminator2_%d.pth" % (opt.experiment, epoch))
         torch.save(model.state_dict(), "./saved_models/%s/net_%d.pth" % (opt.experiment, epoch)) 
+        #torch.save(FeatureExtractor.state_dict(), "./saved_models/%s/fe_%d.pth" % (opt.experiment, epoch)) 
+
+        
