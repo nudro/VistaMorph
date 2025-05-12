@@ -336,7 +336,7 @@ for i, batch in tqdm(enumerate(test_dataloader)):
         theta_np = theta.cpu().numpy()
         # Format: a b tx c d ty 0 0 1
         formatted_theta = f"{theta_np[0][0]:.6f} {theta_np[0][1]:.6f} {theta_np[0][2]:.6f} {theta_np[0][3]:.6f} {theta_np[0][4]:.6f} {theta_np[0][5]:.6f} 0 0 1"
-        with open(f"./images/test_results/{opt.experiment}/predicted_theta_{i:05d}.txt", "w") as f:
+        with open(f"./images/test_results/{opt.experiment}/preds/predicted_theta_{i:05d}.txt", "w") as f:
             f.write(formatted_theta)
     
     # GLOBAL
