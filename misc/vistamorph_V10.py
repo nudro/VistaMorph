@@ -87,19 +87,18 @@ class LocalizerVIT(nn.Module):
         super(LocalizerVIT, self).__init__()
         channels, self.h, self.w = img_shape
         self.vit = nn.Sequential(
-            K.VisionTransformer(image_size=self.h, patch_size=64, in_channels=channels*2) # (A,B), changed from 16-> 32 patch
+            K.VisionTransformer(image_size=self.h, patch_size=64, in_channels=channels*2)
         )
 
     def forward(self, x):
-        # if you try different patch sizes, adjust tensors
-        # patch 16: torch.Size([batch, 257, 768])
-        # patch 32: torch.Size([batch, 65, 768])
-        # patch 64: torch.Size([batch, 17, 768])
         with autocast():
-            out = self.vit(x).type(HalfTensor) # returns at patch_size = 16, torch.Size([batch, 257, 768])
+            # Get ViT output [batch, 17, 768]
+            out = self.vit(x).type(HalfTensor)
+            # Reshape to match expected dimensions
+            out = out.view(out.size(0), 1, 17, 768)
             print("out Vit:", out.size())
         return out
-        
+
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
@@ -118,10 +117,8 @@ class Net(nn.Module):
         )
         
     def stn_phi(self, x):
-        xs = self.localization(x)  # [batch, 17, 768]
-        xs = xs.view(-1, 1 * xs.size(1) * xs.size(2))  # [batch, 17*768]
-        
-        # Generate transformation parameters
+        xs = self.localization(x)  # [batch, 1, 17, 768]
+        xs = xs.view(-1, 1 * xs.size(2) * xs.size(3))  # [batch, 17*768]
         theta = self.fusion(xs)
         theta = theta.view(-1, 2, 3)
         return theta
