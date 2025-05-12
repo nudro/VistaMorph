@@ -261,6 +261,10 @@ def sample_images(batches_done):
     real_A = Variable(imgs["A"].type(HalfTensor)) # torch.Size([1, 3, 256, 256])
     real_B = Variable(imgs["B"].type(HalfTensor))
     
+    # Get edge-detected images
+    edge_A = edge_detection(real_A)
+    edge_B = edge_detection(real_B)
+    
     warped_B, theta = model(img_A=edge_A, img_B=edge_B, src=real_B)
     fake_A1 = generator2(warped_B)
     edge_fake_A1 = edge_detection(fake_A1)
@@ -269,12 +273,13 @@ def sample_images(batches_done):
     def denormalize(x):
         return (x + 1) / 2.0
     
-    real_A_denorm = denormalize(real_A.data)
-    real_B_denorm = denormalize(real_B.data)
-    warped_B_denorm = denormalize(warped_B.data)
-    fake_A1_denorm = denormalize(fake_A1.data)
-    edge_A_denorm = denormalize(edge_A.data)
-    edge_fake_A1_denorm = denormalize(edge_fake_A1.data)
+    # Take only the first sample from each batch
+    real_A_denorm = denormalize(real_A.data[0:1])  # Keep batch dimension
+    real_B_denorm = denormalize(real_B.data[0:1])
+    warped_B_denorm = denormalize(warped_B.data[0:1])
+    fake_A1_denorm = denormalize(fake_A1.data[0:1])
+    edge_A_denorm = denormalize(edge_A.data[0:1])
+    edge_fake_A1_denorm = denormalize(edge_fake_A1.data[0:1])
     
     # Stack images
     img_sample_global = torch.cat((
