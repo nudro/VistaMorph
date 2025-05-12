@@ -192,6 +192,266 @@ def feature_matching_loss(keypoints_A, keypoints_B, theta):
     
     return loss / batch_size
 
+##########################
+# Loss functions
+##########################
+criterion_GAN = torch.nn.BCEWithLogitsLoss() # Relativistic
+
+criterion_lpips = LPIPS(
+    net='vgg',  # choose a network type from ['alex', 'squeeze', 'vgg']
+    version='0.1'  # Currently, v0.1 is supported
+)
+
+criterion_L1 = nn.L1Loss()
+criterion_MSE = nn.MSELoss()  # For tie point loss
+
+############################
+#  Utils
+############################
+
+# Calculate output of image discriminator (PatchGAN)
+patch = (1, opt.img_height // 2 ** 4, opt.img_width // 2 ** 4)
+
+
+def weights_init_normal(m):
+    classname = m.__class__.__name__
+    if classname.find("Conv") != -1:
+        torch.nn.init.normal_(m.weight.data, 0.0, 0.02)
+    elif classname.find("BatchNorm2d") != -1:
+        torch.nn.init.normal_(m.weight.data, 1.0, 0.02)
+        torch.nn.init.constant_(m.bias.data, 0.0)
+
+
+def expand(tensor):
+    # to add 3Channels from 1 channel (handy)
+    t = torch.Tensor(tensor).cuda()
+    t = t.reshape(t.size(0), 1, t.size(1), t.size(2))
+    t = t.expand(-1, 3, -1, -1) # needs to be [1, 3, 256, 256]
+    return t
+
+def sample_images(batches_done):
+    imgs = next(iter(test_dataloader)) # batch_size = 1
+    real_A = Variable(imgs["A"].type(HalfTensor)) # torch.Size([1, 3, 256, 256])
+    real_B = Variable(imgs["B"].type(HalfTensor))
+    
+    warped_B, theta, keypoints_A, keypoints_B = model(img_A=real_A, img_B=real_A, src=real_B)
+    fake_A1 = generator2(warped_B)
+    fake_B = generator1(fake_A1)
+    
+    # Visualize keypoints on images
+    keypoints_A_vis = F.interpolate(keypoints_A, size=(opt.img_height, opt.img_width), mode='bilinear', align_corners=True)
+    keypoints_B_vis = F.interpolate(keypoints_B, size=(opt.img_height, opt.img_width), mode='bilinear', align_corners=True)
+    
+    img_sample_global = torch.cat((real_A.data, real_B.data, warped_B.data, fake_A1.data, fake_B.data, 
+                                 keypoints_A_vis.data, keypoints_B_vis.data), -1)
+    save_image(img_sample_global, "./images/%s/%s.png" % (opt.experiment, batches_done), nrow=4, normalize=True)
+
+class UNetDown(nn.Module):
+    def __init__(self, in_size, out_size, normalize=True, dropout=0.0):
+        super(UNetDown, self).__init__()
+        layers = [nn.Conv2d(in_size, out_size, 4, 1, 1, bias=False)]
+        if normalize:
+            layers.append(nn.InstanceNorm2d(out_size))
+        layers.append(nn.LeakyReLU(0.2))
+        layers.append(antialiased_cnns.BlurPool(out_size, stride=2))
+        if dropout:
+            layers.append(nn.Dropout(dropout))
+        self.model = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.model(x)
+
+
+class UNetUp(nn.Module):
+    def __init__(self, in_size, out_size, dropout=0.0):
+        super(UNetUp, self).__init__()
+        layers = [
+                nn.ConvTranspose2d(in_size, out_size, 4, 2, 1, bias=False),
+                antialiased_cnns.BlurPool(out_size, stride=1),
+                nn.InstanceNorm2d(out_size),
+                nn.ReLU(inplace=True),
+            ]
+        if dropout:
+            layers.append(nn.Dropout(dropout))
+        self.model = nn.Sequential(*layers)
+
+    def forward(self, x, skip_input):
+        x = self.model(x)
+        x = torch.cat((x, skip_input), 1)
+        return x
+
+
+class GeneratorUNet1(nn.Module):
+    def __init__(self, img_shape):
+        super(GeneratorUNet1, self).__init__()
+        channels, self.h, self.w = img_shape
+        self.down1 = UNetDown(channels, 64, normalize=False)
+        self.down2 = UNetDown(64, 128)
+        self.down3 = UNetDown(128, 256, dropout=0.5)
+        self.down4 = UNetDown(256, 512, dropout=0.5)
+        self.down5 = UNetDown(512, 512, normalize=False)
+        self.down6 = UNetDown(512, 512)
+
+        self.up1 = UNetUp(512, 512)
+        self.up2 = UNetUp(1024, 512, dropout=0.5)
+        self.up3 = UNetUp(1024, 256, dropout=0.5)
+        self.up4 = UNetUp(512, 128)
+        self.up5 = UNetUp(256, 64)
+
+        self.final = nn.Sequential(
+            nn.Upsample(scale_factor=2),
+            nn.ZeroPad2d((1, 0, 1, 0)),
+            nn.Conv2d(128, channels, 4, padding=1),
+            nn.Tanh(),
+        )
+
+    def forward(self, x):
+        with autocast():
+            d1 = self.down1(x)
+            d2 = self.down2(d1)
+            d3 = self.down3(d2)
+            d4 = self.down4(d3)
+            d5 = self.down5(d4)
+            d6 = self.down6(d5)
+            u1 = self.up1(d6, d5)
+            u2 = self.up2(u1, d4)
+            u3 = self.up3(u2, d3)
+            u4 = self.up4(u3, d2)
+            u5 = self.up5(u4, d1)
+            output = self.final(u5).type(HalfTensor)
+        return output
+
+
+class GeneratorUNet2(nn.Module):
+    def __init__(self, img_shape):
+        super(GeneratorUNet2, self).__init__()
+        channels, self.h, self.w = img_shape
+        self.down1 = UNetDown(channels, 64, normalize=False)
+        self.down2 = UNetDown(64, 128)
+        self.down3 = UNetDown(128, 256, dropout=0.5)
+        self.down4 = UNetDown(256, 512, dropout=0.5)
+        self.down5 = UNetDown(512, 512, normalize=False)
+        self.down6 = UNetDown(512, 512)
+
+        self.up1 = UNetUp(512, 512)
+        self.up2 = UNetUp(1024, 512, dropout=0.5)
+        self.up3 = UNetUp(1024, 256, dropout=0.5)
+        self.up4 = UNetUp(512, 128)
+        self.up5 = UNetUp(256, 64)
+
+        self.final = nn.Sequential(
+            nn.Upsample(scale_factor=2),
+            nn.ZeroPad2d((1, 0, 1, 0)),
+            nn.Conv2d(128, channels, 4, padding=1),
+            nn.Tanh(),
+        )
+
+    def forward(self, x):
+        with autocast():
+            d1 = self.down1(x)
+            d2 = self.down2(d1)
+            d3 = self.down3(d2)
+            d4 = self.down4(d3)
+            d5 = self.down5(d4)
+            d6 = self.down6(d5)
+            u1 = self.up1(d6, d5)
+            u2 = self.up2(u1, d4)
+            u3 = self.up3(u2, d3)
+            u4 = self.up4(u3, d2)
+            u5 = self.up5(u4, d1)
+            output = self.final(u5).type(HalfTensor)
+        return output
+
+
+class Discriminator1(nn.Module):
+    def __init__(self, img_shape):
+        super(Discriminator1, self).__init__()
+        channels, self.h, self.w = img_shape
+
+        def discriminator_block(in_filters, out_filters):
+            layers = [torch.nn.utils.parametrizations.spectral_norm(
+                nn.Conv2d(in_filters, out_filters, 4, stride=1, padding=1))] # changed to stride=1 instead of 2
+            layers.append(nn.LeakyReLU(0.2, inplace=True))
+            layers.append(antialiased_cnns.BlurPool(out_filters, stride=2)) #blurpool downsample stride=2
+            return layers
+
+        self.model = nn.Sequential(
+            *discriminator_block((channels * 2), 64),
+            *discriminator_block(64, 128),
+            *discriminator_block(128, 256),
+            *discriminator_block(256, 512),
+            nn.ZeroPad2d((1, 0, 1, 0)),
+            nn.Conv2d(512, 1, 4, padding=1, bias=False)
+        )
+
+    def forward(self, img_A, img_B):
+        with autocast():
+            img_input = torch.cat((img_A, img_B), 1)
+            d_in = img_input
+            output = self.model(d_in)
+        return output.type(HalfTensor)
+
+
+class Discriminator2(nn.Module):
+    def __init__(self, img_shape):
+        super(Discriminator2, self).__init__()
+        channels, self.h, self.w = img_shape
+
+        def discriminator_block(in_filters, out_filters):
+            layers = [torch.nn.utils.parametrizations.spectral_norm(
+                nn.Conv2d(in_filters, out_filters, 4, stride=1, padding=1))] # changed to stride=1 instead of 2
+            layers.append(nn.LeakyReLU(0.2, inplace=True))
+            layers.append(antialiased_cnns.BlurPool(out_filters, stride=2)) #blurpool downsample stride=2
+            return layers
+
+        self.model = nn.Sequential(
+            *discriminator_block((channels * 2), 64),
+            *discriminator_block(64, 128),
+            *discriminator_block(128, 256),
+            *discriminator_block(256, 512),
+            nn.ZeroPad2d((1, 0, 1, 0)),
+            nn.Conv2d(512, 1, 4, padding=1, bias=False)
+        )
+
+    def forward(self, img_A, img_B):
+        with autocast():
+            img_input = torch.cat((img_A, img_B), 1)
+            d_in = img_input
+            output = self.model(d_in)
+        return output.type(HalfTensor)
+
+def global_pixel_loss(real_B, fake_B):
+    loss_pix = criterion_L1(fake_B, real_B)
+    return loss_pix
+
+def global_gen_loss(real_A, real_B, fake_img, mode):
+    if mode=='B':
+        pred_fake = discriminator1(fake_img, real_A)
+        real_pred = discriminator1(real_B, real_A)
+        loss_GAN = criterion_GAN(pred_fake - real_pred.detach(), valid)
+    elif mode=='A':
+        pred_fake = discriminator2(fake_img, real_B)
+        real_pred = discriminator2(real_A, real_B)
+        loss_GAN = criterion_GAN(pred_fake - real_pred.detach(), valid)
+    return loss_GAN
+
+def global_disc_loss(real_A, real_B, fake_img, mode):
+    if mode=='B':
+        pred_real = discriminator1(real_B, real_A)
+        pred_fake = discriminator1(fake_img.detach(), real_A)
+        loss_real = criterion_GAN(pred_real - pred_fake, valid)
+        loss_fake = criterion_GAN(pred_fake - pred_real, fake)
+        loss_D = 0.25*(loss_real + loss_fake)
+
+    if mode=='A':
+        pred_real = discriminator2(real_A, real_B)
+        pred_fake = discriminator2(fake_img.detach(), real_B)
+        loss_real = criterion_GAN(pred_real - pred_fake, valid)
+        loss_fake = criterion_GAN(pred_fake - pred_real, fake)
+        loss_D = 0.25*(loss_real + loss_fake)
+
+    return loss_D
+
 ##############################
 #       Training
 ##############################
