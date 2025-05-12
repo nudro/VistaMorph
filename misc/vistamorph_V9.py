@@ -264,9 +264,13 @@ def sample_images(batches_done):
     fake_A1 = generator2(warped_B)
     fake_B = generator1(fake_A1)
     
-    # Visualize keypoints on images
+    # Visualize keypoints on images and ensure 3 channels
     keypoints_A_vis = F.interpolate(keypoints_A, size=(opt.img_height, opt.img_width), mode='bilinear', align_corners=True)
     keypoints_B_vis = F.interpolate(keypoints_B, size=(opt.img_height, opt.img_width), mode='bilinear', align_corners=True)
+    
+    # Expand keypoint tensors to 3 channels
+    keypoints_A_vis = keypoints_A_vis.expand(-1, 3, -1, -1)
+    keypoints_B_vis = keypoints_B_vis.expand(-1, 3, -1, -1)
     
     img_sample_global = torch.cat((real_A.data, real_B.data, warped_B.data, fake_A1.data, fake_B.data, 
                                  keypoints_A_vis.data, keypoints_B_vis.data), -1)
