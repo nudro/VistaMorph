@@ -86,8 +86,9 @@ class LocalizerVIT(nn.Module):
     def __init__(self, img_shape):
         super(LocalizerVIT, self).__init__()
         channels, self.h, self.w = img_shape
+        # Change back to 6 channels since we'll expand edge images to 3 channels each
         self.vit = nn.Sequential(
-            K.VisionTransformer(image_size=self.h, patch_size=64, in_channels=2)
+            K.VisionTransformer(image_size=self.h, patch_size=64, in_channels=6)
         )
 
     def forward(self, x):
@@ -127,8 +128,12 @@ class Net(nn.Module):
         identity_matrix = [1, 0, 0, 0, 1, 0]
 
         with autocast():
-            # Ensure edge-detected images are properly concatenated
-            img_input = torch.cat((img_A, img_B), 1)  # [batch, 2, H, W]
+            # Expand edge-detected images to 3 channels each
+            edge_A_expanded = img_A.expand(-1, 3, -1, -1)  # [batch, 3, H, W]
+            edge_B_expanded = img_B.expand(-1, 3, -1, -1)  # [batch, 3, H, W]
+            
+            # Concatenate expanded edge images
+            img_input = torch.cat((edge_A_expanded, edge_B_expanded), 1)  # [batch, 6, H, W]
             dtheta = self.stn_phi(img_input)
             
             identity_theta = torch.tensor(identity_matrix, dtype=torch.float).cuda()
