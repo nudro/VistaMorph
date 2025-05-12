@@ -157,9 +157,9 @@ class Net(nn.Module):
         self.localization = LocalizerVIT(input_shape)
         self.feature_extractor = FeatureExtractor()
         
-        # Feature fusion layer
+        # Feature fusion layer - adjusted dimensions
         self.fusion = nn.Sequential(
-            nn.Linear(1*17*768 + 256, 1024),
+            nn.Linear(1*17*768 + 256*2, 1024),  # 256*2 for both feature descriptors
             nn.ReLU(True),
             nn.Linear(1024, 256),
             nn.ReLU(True),
@@ -169,11 +169,11 @@ class Net(nn.Module):
         )
         
     def stn_phi(self, x, features_A, features_B):
-        xs = self.localization(x)
-        xs = xs.view(-1, 1 * xs.size(1) * xs.size(2))
+        xs = self.localization(x)  # [batch, 17, 768]
+        xs = xs.view(-1, 1 * xs.size(1) * xs.size(2))  # [batch, 17*768]
         
         # Concatenate features with localization output
-        combined = torch.cat([xs, features_A, features_B], dim=1)
+        combined = torch.cat([xs, features_A, features_B], dim=1)  # [batch, 17*768 + 256*2]
         theta = self.fusion(combined)
         theta = theta.view(-1, 2, 3)
         return theta
@@ -186,9 +186,9 @@ class Net(nn.Module):
             keypoints_A, descriptors_A = self.feature_extractor(img_A)
             keypoints_B, descriptors_B = self.feature_extractor(img_B)
             
-            # Combine features
-            features_A = descriptors_A.mean(dim=[2, 3])
-            features_B = descriptors_B.mean(dim=[2, 3])
+            # Combine features - take mean across spatial dimensions
+            features_A = descriptors_A.mean(dim=[2, 3])  # [batch, 256]
+            features_B = descriptors_B.mean(dim=[2, 3])  # [batch, 256]
             
             img_input = torch.cat((img_A, img_B), 1)
             dtheta = self.stn_phi(img_input, features_A, features_B)
