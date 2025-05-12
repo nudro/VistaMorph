@@ -77,38 +77,54 @@ class FeatureExtractor(nn.Module):
     def __init__(self, in_channels=3):
         super(FeatureExtractor, self).__init__()
         
-        # Feature extraction layers
-        self.conv1 = nn.Conv2d(in_channels, 64, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
-        self.conv3 = nn.Conv2d(128, 256, kernel_size=3, padding=1)
-        self.conv4 = nn.Conv2d(256, 512, kernel_size=3, padding=1)
+        # Add batch normalization to help with gradient flow
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(in_channels, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(0.2, inplace=True)
+        )
+        self.conv2 = nn.Sequential(
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.2, inplace=True)
+        )
+        self.conv3 = nn.Sequential(
+            nn.Conv2d(128, 256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.2, inplace=True)
+        )
+        self.conv4 = nn.Sequential(
+            nn.Conv2d(256, 512, kernel_size=3, padding=1),
+            nn.BatchNorm2d(512),
+            nn.LeakyReLU(0.2, inplace=True)
+        )
         
-        # Feature point detection
-        self.keypoint_conv = nn.Conv2d(512, 1, kernel_size=1)
+        # Use sigmoid instead of softmax for keypoint detection
+        self.keypoint_conv = nn.Sequential(
+            nn.Conv2d(512, 1, kernel_size=1),
+            nn.Sigmoid()
+        )
         
-        # Feature descriptor
         self.descriptor_conv = nn.Conv2d(512, 256, kernel_size=1)
         
-        self.relu = nn.ReLU(inplace=True)
-        self.pool = nn.MaxPool2d(2, 2)
+        # Use average pooling instead of max pooling
+        self.pool = nn.AvgPool2d(2, 2)
         
     def forward(self, x):
         # Feature extraction
-        x1 = self.relu(self.conv1(x))
+        x1 = self.conv1(x)
         x1 = self.pool(x1)
         
-        x2 = self.relu(self.conv2(x1))
+        x2 = self.conv2(x1)
         x2 = self.pool(x2)
         
-        x3 = self.relu(self.conv3(x2))
+        x3 = self.conv3(x2)
         x3 = self.pool(x3)
         
-        x4 = self.relu(self.conv4(x3))
+        x4 = self.conv4(x3)
         
         # Keypoint detection
         keypoints = self.keypoint_conv(x4)
-        keypoints = F.softmax(keypoints.view(keypoints.size(0), -1), dim=1)
-        keypoints = keypoints.view(keypoints.size(0), 1, x4.size(2), x4.size(3))
         
         # Feature descriptors
         descriptors = self.descriptor_conv(x4)
@@ -476,7 +492,6 @@ class Discriminator2(nn.Module):
 #################
 
 def feature_matching_loss(keypoints_A, keypoints_B, theta):
-    # Convert keypoints to coordinates
     batch_size = keypoints_A.size(0)
     loss = 0
     
@@ -485,28 +500,7 @@ def feature_matching_loss(keypoints_A, keypoints_B, theta):
         kp_A = keypoints_A[b].view(-1)
         kp_B = keypoints_B[b].view(-1)
         
-        # Apply non-maximum suppression to avoid selecting nearby points
-        def nms(keypoints, k=100, threshold=0.1):
-            scores, indices = torch.topk(keypoints, k=k)
-            # Convert to 2D coordinates
-            h, w = keypoints_A.size(2), keypoints_A.size(3)
-            y = indices // w
-            x = indices % w
-            
-            # Remove points that are too close to each other
-            coords = torch.stack([x.float(), y.float()], dim=1)
-            dist_matrix = torch.cdist(coords, coords)
-            mask = torch.ones_like(scores, dtype=torch.bool)
-            
-            for i in range(len(scores)):
-                if mask[i]:
-                    # Mark points that are too close as invalid
-                    mask[dist_matrix[i] < threshold] = False
-                    mask[i] = True  # Keep the current point
-            
-            return scores[mask], indices[mask]
-        
-        # Apply NMS to both sets of keypoints
+        # Apply non-maximum suppression
         scores_A, idx_A = nms(kp_A)
         scores_B, idx_B = nms(kp_B)
         
@@ -524,22 +518,22 @@ def feature_matching_loss(keypoints_A, keypoints_B, theta):
         coords_A = torch.stack([x_A, y_A], dim=1)
         coords_B = torch.stack([x_B, y_B], dim=1)
         
-        # Apply transformation to A coordinates
+        # Apply transformation to A coordinates with better numerical stability
         theta_b = theta[b].view(2, 3)
         ones = torch.ones(coords_A.size(0), 1).cuda()
         coords_A_homo = torch.cat([coords_A, ones], dim=1)
         transformed_A = torch.mm(coords_A_homo, theta_b.t())
         
-        # Calculate distance between transformed points and B points
+        # Calculate distance with L2 norm and add epsilon for numerical stability
         dist = torch.cdist(transformed_A, coords_B)
         min_dist, _ = torch.min(dist, dim=1)
         
-        # Add confidence weighting
-        confidence = scores_A * scores_B
+        # Add confidence weighting with better scaling
+        confidence = torch.clamp(scores_A * scores_B, min=1e-6)
         weighted_loss = (min_dist * confidence).mean()
         
-        # Normalize by image size
-        normalized_loss = weighted_loss / (opt.img_height * opt.img_width)
+        # Use a more stable normalization
+        normalized_loss = weighted_loss / (torch.sqrt(torch.tensor(opt.img_height * opt.img_width).float()))
         loss += normalized_loss
     
     return loss / batch_size
@@ -673,6 +667,10 @@ f = open('./LOGS/{}.txt'.format(opt.experiment), 'a+')
 # AMP
 scaler = GradScaler()
 
+# Add these constants at the top of the file after the imports
+LAMBDA_FEATURE = 0.1  # Weight for feature matching loss
+MAX_GRAD_NORM = 1.0   # Maximum gradient norm for clipping
+
 for epoch in range(opt.epoch, opt.n_epochs):
     for i, batch in enumerate(dataloader):
         real_A = Variable(batch["A"].type(HalfTensor))
@@ -737,7 +735,15 @@ for epoch in range(opt.epoch, opt.n_epochs):
                      alpha1*cycle_loss + alpha2*tie_loss + alpha3*identity_loss +
                      alpha4*feat_loss).mean()
 
-        scaler.scale(loss_G).backward()
+        # Compute feature matching loss
+        feature_loss = feature_matching_loss(keypoints_A, keypoints_B, theta)
+        
+        # Combine losses with weighting
+        total_loss = loss_G + LAMBDA_FEATURE * feature_loss
+        
+        # Backward pass with gradient clipping
+        scaler.scale(total_loss).backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), MAX_GRAD_NORM)
         scaler.step(optimizer_G)
         print("+ + + optimizer_G.step() + + + ")
 

@@ -18,14 +18,18 @@ from lpips import LPIPS
 from torch.distributed import Backend
 from torch.cuda.amp import GradScaler, autocast
 import antialiased_cnns
-from datasets_stn_with_labels import * # only A and B
+from datasets_stn import * # only A and B
 import kornia
 from lpips import LPIPS
 from kornia import morphology as morph
 import kornia.contrib as K
 
+"""
+Version of VistaMorph with Fourier Transform Loss to handle datasets where there are
+dark or low-light visible pairs. No morphological triplet loss. Uses Apple M3 GPU.
 
-# ResidualBlock
+"""
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--epoch", type=int, default=0, help="epoch to start training from")
@@ -57,7 +61,7 @@ torch.manual_seed(42)
 ##########################
 # Loss functions
 ##########################
-criterion_GAN = torch.nn.BCEWithLogitsLoss() # Relativistic
+criterion_GAN = torch.nn.BCEWithLogitsLoss() # Relativitic
 
 criterion_lpips = LPIPS(
     net='vgg',  # choose a network type from ['alex', 'squeeze', 'vgg']
@@ -65,8 +69,10 @@ criterion_lpips = LPIPS(
 )
 
 criterion_L1 = nn.L1Loss()
-criterion_morph = nn.TripletMarginLoss(margin=1.0, p=2)
-criterion_MSE = nn.MSELoss()  # For tie point loss
+
+# Amplitude and Phase Losses for the FFT Loss
+criterion_amp = nn.L1Loss()
+criterion_phase = nn.L1Loss()
 
 ############################
 #  Utils
@@ -92,15 +98,15 @@ def expand(tensor):
     t = t.expand(-1, 3, -1, -1) # needs to be [1, 3, 256, 256]
     return t
 
+
 def sample_images(batches_done):
     imgs = next(iter(test_dataloader)) # batch_size = 1
     real_A = Variable(imgs["A"].type(HalfTensor)) # torch.Size([1, 3, 256, 256])
     real_B = Variable(imgs["B"].type(HalfTensor))
-    
-    warped_B, theta = model(img_A=real_A, img_B=real_A, src=real_B)
-    fake_A1 = generator2(warped_B)
-    fake_B = generator1(fake_A1)
-    
+    fake_B = generator1(real_A)
+    fake_A1 = generator2(real_B)
+    # pass to generator 2 for fake_A
+    warped_B = model(img_A=real_A, img_B=fake_A1, src=real_B)
     img_sample_global = torch.cat((real_A.data, real_B.data, warped_B.data, fake_A1.data, fake_B.data), -1)
     save_image(img_sample_global, "./images/%s/%s.png" % (opt.experiment, batches_done), nrow=4, normalize=True)
 
@@ -131,17 +137,6 @@ class LocalizerVIT(nn.Module):
 # STN (Jadeerburg, 2015)
 # Adopted from https://pytorch.org/tutorials/intermediate/spatial_transformer_tutorial.html
 ####################################################################
-class ResidualBlock(nn.Module):
-    def __init__(self, in_features):
-        super(ResidualBlock, self).__init__()
-        self.block = nn.Sequential(
-            nn.Linear(in_features, in_features),
-            nn.ReLU(True),
-            nn.Linear(in_features, in_features)
-        )
-    
-    def forward(self, x):
-        return x + self.block(x)
 
 
 class Net(nn.Module):
@@ -150,18 +145,17 @@ class Net(nn.Module):
         input_shape = (opt.channels, opt.img_height, opt.img_width)
         self.localization = LocalizerVIT(input_shape)
         self.theta_emb = nn.Linear(1, opt.img_height * opt.img_width)
-        
-        self.fc_loc = nn.Sequential(
-           nn.Linear(1*17*768, 1024),
-           nn.ReLU(True),
-           nn.Linear(1024, 256),
-           nn.ReLU(True),
-           ResidualBlock(256),
-           nn.Linear(256, 3*2),
-           nn.Sigmoid())
-        
-        self.fc_loc[2].bias.data.zero_() # DO NOT CHANGE!
 
+        # nn.Linear(1*257*768, 1024), # (hard-coded in, 257, 768 based on ViT output)
+        self.fc_loc = nn.Sequential(
+            nn.Linear(1*17*768, 1024),
+            nn.ReLU(True),
+            nn.Linear(1024, 512), # Added more layers, will this stop the affine warp?
+            nn.ReLU(True),
+            nn.Linear(512, 256),
+            nn.Sigmoid(), # <--- SIGMOID will this force the matrix values between [-1,+1]
+            nn.Linear(256, 3*2))
+        self.fc_loc[2].bias.data.zero_() # DO NOT CHANGE!
 
     def stn_phi(self, x):
         xs = self.localization(x) # (A,B), 6 ch
@@ -178,11 +172,11 @@ class Net(nn.Module):
             dtheta = self.stn_phi(img_input)
             identity_theta = torch.tensor(identity_matrix, dtype=torch.float).cuda()
             dtheta = dtheta.reshape(img_A.size(0), 2*3)
-            theta = dtheta + identity_theta.unsqueeze(0).repeat(img_A.size(0),1)
+            dtheta = dtheta + identity_theta.unsqueeze(0).repeat(img_A.size(0),1)
 
             # get each theta for the batch
             theta_batches = []
-            for t in theta:
+            for t in dtheta:
                 this_theta = (t.view(-1, 2, 3)).reshape(1,2,3)
                 theta_batches.append(this_theta)
 
@@ -201,7 +195,7 @@ class Net(nn.Module):
                 Rs = F.grid_sample(src_tensors[i], rs_grid,  mode='bicubic', padding_mode='border', align_corners=True)
                 warped.append(Rs.type(HalfTensor))
 
-        return torch.cat(warped), theta  # Now returning both the warped image and the affine matrix
+        return torch.cat(warped)
 
 ##############################
 # 2 Generators
@@ -390,38 +384,27 @@ class Discriminator2(nn.Module):
             output = self.model(d_in)
         return output.type(HalfTensor)
 
+
 #####################
 # LOSSES
 #####################
 
-
-def morph_triplet(real_A, real_B, reg_B):
-    kernel = torch.tensor([[0, 1, 0],[1, 1, 1],[0, 1, 0]]).cuda()
-    # apply mogrphological grad using kernel
-    m_A = 1. - (morph.gradient(real_A, kernel)) # Morphological gradient
-    m_B = 1. - (morph.gradient(real_B, kernel)) # Morphological gradient
-    m_GB = 1. - (morph.gradient(reg_B, kernel)) # Morphological gradient
-
-    loss = criterion_morph(m_GB, m_A, m_B) # anc, pos, neg
-    return loss
-
-
-def global_pixel_loss(real_B, fake_B):
-    loss_pix = criterion_L1(fake_B, real_B)
+def global_pixel_loss(fake_A, real_A):
+    loss_pix = criterion_L1(fake_A, real_A) # LPIPS
     return loss_pix
-
 
 def global_gen_loss(real_A, real_B, fake_img, mode):
     if mode=='B':
         pred_fake = discriminator1(fake_img, real_A)
         real_pred = discriminator1(real_B, real_A)
         loss_GAN = criterion_GAN(pred_fake - real_pred.detach(), valid)
+
     elif mode=='A':
         pred_fake = discriminator2(fake_img, real_B)
         real_pred = discriminator2(real_A, real_B)
         loss_GAN = criterion_GAN(pred_fake - real_pred.detach(), valid)
-    return loss_GAN
 
+    return loss_GAN
 
 def global_disc_loss(real_A, real_B, fake_img, mode):
     if mode=='B':
@@ -429,21 +412,63 @@ def global_disc_loss(real_A, real_B, fake_img, mode):
         pred_fake = discriminator1(fake_img.detach(), real_A)
         loss_real = criterion_GAN(pred_real - pred_fake, valid)
         loss_fake = criterion_GAN(pred_fake - pred_real, fake)
-        loss_D = 0.25*(loss_real + loss_fake)
+        loss_D = (loss_real + loss_fake).mean()
 
     if mode=='A':
         pred_real = discriminator2(real_A, real_B)
         pred_fake = discriminator2(fake_img.detach(), real_B)
+
         loss_real = criterion_GAN(pred_real - pred_fake, valid)
         loss_fake = criterion_GAN(pred_fake - pred_real, fake)
-        loss_D = 0.25*(loss_real + loss_fake)
+        loss_D = (loss_real + loss_fake).mean()
 
     return loss_D
 
 
+class FFT_Components(object):
+
+    def __init__(self, image):
+        self.image = image
+
+    def make_components(self):
+        img = np.array(self.image) #turn into numpy
+        f_result = np.fft.rfft2(img)
+        fshift = np.fft.fftshift(f_result)
+        amp = np.abs(fshift)
+        phase = np.arctan2(fshift.imag,fshift.real)
+        return amp, phase
+
+    def make_spectra(self):
+        img = np.array(self.image) #turn into numpy
+        f_result = np.fft.fft2(img) # setting this to regular FFT2 to make magnitude spectra
+        fshift = np.fft.fftshift(f_result)
+        magnitude_spectrum = np.log(np.abs(fshift))
+        return magnitude_spectrum
+
+
+def fft_components(thermal_tensor):
+    # thermal_tensor can be fake_B or real_B
+    AMP = []
+    PHA = []
+    for t in range(0, opt.batch_size):
+        # thermal images must be in grayscale (1 channel)
+        b = transforms.ToPILImage()(thermal_tensor[t, :, :, :]).convert("L")
+        fft_space = FFT_Components(b)
+        amp, phase = torch.Tensor(fft_space.make_components()).cuda() # convert them into torch tensors
+        AMP.append(amp)
+        PHA.append(phase)
+
+    # reshape each amplitude and phase to Torch tensors
+    # For FFT2 the dims is 256 x 129 for half of all real values + 1 col due to Hermitian Symmetry
+    AMP_tensor = torch.cat(AMP).reshape(opt.batch_size, 1, opt.img_height, 129)
+    PHA_tensor = torch.cat(PHA).reshape(opt.batch_size, 1, opt.img_height, 129)
+    return AMP_tensor, PHA_tensor
+
 # ===========================================================
 # Initialize generator and discriminator
 # ===========================================================
+
+
 input_shape_patch = (opt.channels, opt.img_height, opt.img_width)
 generator1 = GeneratorUNet1(input_shape_patch) # for fake_B
 generator2 = GeneratorUNet2(input_shape_patch) # for fake_A
@@ -458,18 +483,17 @@ if cuda:
     model = Net().cuda()
 
     criterion_GAN.cuda()
-    criterion_lpips.cuda()
     criterion_L1.cuda()
-    criterion_morph.cuda()
-    criterion_MSE.cuda()
+    criterion_lpips.cuda()
+    criterion_amp.cuda()
+    criterion_phase.cuda()
 
 # Trained on multigpus - change your device ids if needed
-generator1 = torch.nn.DataParallel(generator1, device_ids=[0,1])
-generator2 = torch.nn.DataParallel(generator2, device_ids=[0,1])
-discriminator1 = torch.nn.DataParallel(discriminator1, device_ids=[0,1])
-discriminator2 = torch.nn.DataParallel(discriminator2, device_ids=[0,1])
-model = torch.nn.DataParallel(model, device_ids=[0,1])
-
+generator1 = torch.nn.DataParallel(generator1, device_ids=[0, 1])
+generator2 = torch.nn.DataParallel(generator2, device_ids=[0, 1])
+discriminator1 = torch.nn.DataParallel(discriminator1, device_ids=[0, 1])
+discriminator2 = torch.nn.DataParallel(discriminator2, device_ids=[0, 1])
+model = torch.nn.DataParallel(model, device_ids=[0, 1])
 
 if opt.epoch != 0:
     # Load pretrained models
@@ -495,6 +519,7 @@ optimizer_D = torch.optim.Adam(itertools.chain(discriminator1.parameters(), disc
 Tensor = torch.cuda.FloatTensor if cuda else torch.Tensor
 HalfTensor = torch.cuda.HalfTensor if cuda else torch.HalfTensor
 
+
 ##############################
 # Transforms and Dataloaders
 ##############################
@@ -507,8 +532,7 @@ transforms_ = [
 
 dataloader = DataLoader(
     ImageDataset(root = "./data/%s" % opt.dataset_name,
-        transforms_=transforms_,
-        mode="train"),
+        transforms_=transforms_),
     batch_size=opt.batch_size,
     shuffle=True,
     num_workers=opt.n_cpu,
@@ -538,11 +562,10 @@ for epoch in range(opt.epoch, opt.n_epochs):
     for i, batch in enumerate(dataloader):
         real_A = Variable(batch["A"].type(HalfTensor))
         real_B = Variable(batch["B"].type(HalfTensor))
-        Y = Variable(batch["Y"].type(HalfTensor))  # Ground truth affine matrix
 
         # Adversarial ground truths
         valid_ones = Variable(HalfTensor(np.ones((real_A.size(0), *patch))), requires_grad=False)
-        valid = valid_ones.fill_(0.9) # one-sided label smoothing of 0.9 vs. 1.0
+        valid = valid_ones.fill_(0.9)
         fake = Variable(HalfTensor(np.zeros((real_A.size(0), *patch))), requires_grad=False)
 
         # ------------------
@@ -552,54 +575,37 @@ for epoch in range(opt.epoch, opt.n_epochs):
         print("+ + + optimizer_G.zero_grad() + + + ")
         with autocast():
 
-            # will SAR/EO work in plain STN?
-            warped_B, theta = model(img_A=real_A, img_B=real_A, src=real_B)
-            
-            # fake_A1 should look the same as real_A since the registered B should get closer to generating a geometric acc A
-            fake_A1 = generator2(warped_B)
-            fake_B = generator1(fake_A1)
-            
-            # Add cycle consistency
-            cycle_A = generator2(fake_B)  # Should be close to real_A
-            cycle_B = generator1(fake_A1)  # Should be close to warped_B
-            
-            # if warped_B is an exact match to fake_A1, then translating it back will make a thermal B close to the warped correct one
-            # since the warped one can only be correctly made if it meets the real_A
-            recon_loss1 = global_pixel_loss(fake_A1, real_A)
-            recon_loss2 = global_pixel_loss(fake_B, warped_B)
-            recon_loss = (recon_loss1 + recon_loss2).mean()
-            
-            # Add cycle consistency loss
-            cycle_loss = (global_pixel_loss(cycle_A, real_A) + global_pixel_loss(cycle_B, warped_B)).mean()
-            
-            # Add identity loss to maintain real_A features in fake_A1
-            identity_loss = global_pixel_loss(fake_A1, real_A)
+            # fake_B
+            fake_B = generator1(real_A)
 
-            # the real_B is so off that if you try to translate it, the fake_A will also be very off
-            # so there's no use in generating a fake SAR image
-            # the only ground truth we can rely on is the real_A
+            # pass to generator 2 for fake_A
+            warped_B = model(img_A=real_A, img_B=fake_B, src=real_B)
+            fake_A = generator2(warped_B)
+
+            # min recon loss
+            recon_loss = global_pixel_loss(warped_B, fake_B)
+
             # perceptual loss, LPIPS
-            perc_A = criterion_lpips(fake_A1, real_A)
-            perc_B = criterion_lpips(fake_B, warped_B)
+            perc_A = criterion_lpips(fake_A, real_A)
+            perc_B = criterion_lpips(fake_B, real_B)
             perc_loss = (perc_A + perc_B).mean()
 
-            # triplet morph loss / all cast into same gradient modality of RGB
-            # reinforce the qualty of the fake A if the warped is right
-            morph_loss = morph_triplet(real_A, real_B, fake_A1)
+            # Fourier Transform Loss
+            Amp_f, Pha_f = fft_components(fake_A) # will pass a batch in
+            Amp_r, Pha_r = fft_components(real_A)
+            loss_Amp = criterion_amp(Amp_f, Amp_r)
+            loss_Pha = criterion_phase(Pha_f, Pha_r)
+            loss_FFT = (loss_Amp + loss_Pha).mean()
 
-            # Adverarial - How fake and how real
-            loss_GAN1 = global_gen_loss(real_A, warped_B, fake_B, mode='B')
-            loss_GAN2 = global_gen_loss(real_A, warped_B, fake_A1, mode='A')
+            # Adverarial
+            loss_GAN1 = global_gen_loss(real_A, real_B, fake_B, mode='B')
+            loss_GAN2 = global_gen_loss(real_A, real_B, fake_A, mode='A')
             loss_GAN = (loss_GAN1 + loss_GAN2).mean()
 
-            # Tie point loss - MSE between predicted and ground truth affine matrices
-            tie_loss = criterion_MSE(theta, Y)
-
-            # Total Loss with adjusted weights
-            alpha1 = 0.05  # Cycle consistency weight
-            alpha2 = 0.25  # Tie point loss weight
-            alpha3 = 0.1   # Identity loss weight
-            loss_G = (loss_GAN + recon_loss + perc_loss + morph_loss + alpha1*cycle_loss + alpha2*tie_loss + alpha3*identity_loss).mean()
+            # Total Loss
+            alpha1 = 0.001
+            alpha2 = 0.01
+            loss_G = (loss_GAN + recon_loss + perc_loss + loss_FFT).mean()
 
         scaler.scale(loss_G).backward()
         scaler.step(optimizer_G)
@@ -613,8 +619,8 @@ for epoch in range(opt.epoch, opt.n_epochs):
         print("+ + + optimizer_D.zero_grad() + + +")
         with autocast():
             loss_D1 = global_disc_loss(real_A, real_B, fake_img=fake_B, mode='B')
-            loss_D2 = global_disc_loss(real_A, real_B, fake_img=fake_A1, mode='A')
-            loss_D = (loss_D1 + loss_D2).mean()
+            loss_D2 = global_disc_loss(real_A, real_B, fake_img=fake_A, mode='A')
+            loss_D = 0.5*(loss_D1 + loss_D2)
 
         scaler.scale(loss_D).backward()
         scaler.step(optimizer_D)
@@ -633,7 +639,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
         # Print log
         sys.stdout.write(
-            "\r[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f, R: %f, M:%f, P: %f, T: %f] ETA: %s"
+            "\r[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f, R(L1): %f, Perc(L1): %f] ETA: %s"
             % (
                 epoch, #%d
                 opt.n_epochs, #%d
@@ -642,15 +648,13 @@ for epoch in range(opt.epoch, opt.n_epochs):
                 loss_D.item(), #%f
                 loss_G.item(), #%f - total G loss
                 recon_loss.item(),
-                morph_loss.item(),
                 perc_loss.item(),
-                tie_loss.item()*0.25,
                 time_left, #%s
             )
         )
 
         f.write(
-            "\r[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f, R:%f, M:%f, P: %f, T: %f] ETA: %s"
+            "\r[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f, R(L1): %f, Perc(L1): %f] ETA: %s"
             % (
                 epoch, #%d
                 opt.n_epochs, #%d
@@ -659,9 +663,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
                 loss_D.item(), #%f
                 loss_G.item(), #%f - total G loss
                 recon_loss.item(),
-                morph_loss.item(),
                 perc_loss.item(),
-                tie_loss.item(),
                 time_left, #%s
             )
         )
@@ -677,4 +679,4 @@ for epoch in range(opt.epoch, opt.n_epochs):
         torch.save(generator2.state_dict(), "./saved_models/%s/generator2_%d.pth" % (opt.experiment, epoch))
         torch.save(discriminator1.state_dict(), "./saved_models/%s/discriminator1_%d.pth" % (opt.experiment, epoch))
         torch.save(discriminator2.state_dict(), "./saved_models/%s/discriminator2_%d.pth" % (opt.experiment, epoch))
-        torch.save(model.state_dict(), "./saved_models/%s/net_%d.pth" % (opt.experiment, epoch))
+        torch.save(model.state_dict(), "./saved_models/%s/stn_%d.pth" % (opt.experiment, epoch))
