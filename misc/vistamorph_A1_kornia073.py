@@ -333,17 +333,21 @@ def adalam(warped_B, real_A, device, return_matches=False):
         kpts_warped, desc_warped = keynet(warped_B_gray)
         kpts_real, desc_real = keynet(real_A_gray)
         
-        # Match keypoints using AdaLAM
-        matches = adalam_matcher(desc_warped, desc_real, kpts_warped, kpts_real)
+        # Match keypoints using AdaLAM with lower threshold
+        matches = adalam_matcher(desc_warped, desc_real, kpts_warped, kpts_real, config={'threshold': 0.9})
         
         if return_matches:
             all_matches.append(matches)
             all_kpts_warped.append(kpts_warped)
             all_kpts_real.append(kpts_real)
         else:
-            # Calculate homography loss for this image
-            homog_loss = compute_homog_loss(matches, kpts_warped, kpts_real, device)
-            total_homog_loss += homog_loss
+            # If no matches found, use a small loss value
+            if len(matches) == 0:
+                total_homog_loss += torch.tensor(0.1, device=device)
+            else:
+                # Calculate homography loss for this image
+                homog_loss = compute_homog_loss(matches, kpts_warped, kpts_real, device)
+                total_homog_loss += homog_loss
     
     if return_matches:
         # For visualization, return results from first image in batch
