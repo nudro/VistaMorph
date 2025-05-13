@@ -413,8 +413,8 @@ def homog_loss(matches, kpts_warped, kpts_real, device):
 def adalam(warped_B, real_A, device, return_matches=False):
     """Perform keypoint detection and matching using KeyNet and AdaLAM.
     Args:
-        warped_B: Warped image tensor
-        real_A: Real image tensor
+        warped_B: Warped image tensor [B, C, H, W]
+        real_A: Real image tensor [B, C, H, W]
         device: Device to use for tensor operations
         return_matches: Whether to return matches and keypoints for visualization
     Returns:
@@ -423,24 +423,48 @@ def adalam(warped_B, real_A, device, return_matches=False):
         If return_matches is True:
             tuple: (matches, kpts_warped, kpts_real)
     """
-    # Convert images to grayscale for keypoint detection
-    warped_B_gray = kornia.color.rgb_to_grayscale(warped_B)
-    real_A_gray = kornia.color.rgb_to_grayscale(real_A)
-    
-    # Detect keypoints using KeyNet
+    batch_size = warped_B.size(0)
     keynet = kornia.feature.KeyNetDetector()
-    kpts_warped, desc_warped = keynet(warped_B_gray)
-    kpts_real, desc_real = keynet(real_A_gray)
-    
-    # Match keypoints using AdaLAM
     adalam_matcher = kornia.feature.AdaLAM()
-    matches = adalam_matcher(desc_warped, desc_real, kpts_warped, kpts_real)
+    
+    # Initialize lists to store results for each image in batch
+    all_matches = []
+    all_kpts_warped = []
+    all_kpts_real = []
+    total_homog_loss = torch.tensor(0.0, device=device)
+    
+    # Process each image in the batch
+    for i in range(batch_size):
+        # Get single images from batch
+        warped_B_single = warped_B[i:i+1]  # Keep batch dimension
+        real_A_single = real_A[i:i+1]      # Keep batch dimension
+        
+        # Convert to grayscale
+        warped_B_gray = kornia.color.rgb_to_grayscale(warped_B_single)
+        real_A_gray = kornia.color.rgb_to_grayscale(real_A_single)
+        
+        # Detect keypoints using KeyNet
+        kpts_warped, desc_warped = keynet(warped_B_gray)
+        kpts_real, desc_real = keynet(real_A_gray)
+        
+        # Match keypoints using AdaLAM
+        matches = adalam_matcher(desc_warped, desc_real, kpts_warped, kpts_real)
+        
+        if return_matches:
+            all_matches.append(matches)
+            all_kpts_warped.append(kpts_warped)
+            all_kpts_real.append(kpts_real)
+        else:
+            # Calculate homography loss for this image
+            homog_loss = homog_loss(matches, kpts_warped, kpts_real, device)
+            total_homog_loss += homog_loss
     
     if return_matches:
-        return matches, kpts_warped, kpts_real
-    
-    # Calculate homography loss
-    return homog_loss(matches, kpts_warped, kpts_real, device)
+        # For visualization, return results from first image in batch
+        return all_matches[0], all_kpts_warped[0], all_kpts_real[0]
+    else:
+        # Return average homography loss across batch
+        return total_homog_loss / batch_size
 
 for epoch in range(opt.epoch, opt.n_epochs):
     for i, batch in enumerate(dataloader):
