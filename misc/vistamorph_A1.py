@@ -18,7 +18,7 @@ from lpips import LPIPS
 from torch.distributed import Backend
 from torch.cuda.amp import GradScaler, autocast
 import antialiased_cnns
-from datasets_stn_with_labels import * # only A and B
+from datasets_stn_with_labels_A1 import * # only A and B
 import kornia
 import kornia.feature as KF
 from lpips import LPIPS
