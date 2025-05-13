@@ -42,6 +42,7 @@ parser.add_argument("--sample_interval", type=int, default=50, help="interval be
 parser.add_argument("--checkpoint_interval", type=int, default=50, help="interval between model checkpoints")
 parser.add_argument("--gpu_num", type=int, default=0, help="gpu card")
 parser.add_argument("--experiment", type=str, default="tfcgan_stn_arar", help="experiment name")
+parser.add_argument("--decay_epoch", type=int, default=100, help="epoch from which to start lr decay")
 opt = parser.parse_args()
 
 os.makedirs("./images/%s" % opt.experiment, exist_ok=True)
@@ -370,6 +371,16 @@ lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
 # Input tensor type
 Tensor = torch.cuda.FloatTensor if cuda else torch.Tensor
 HalfTensor = torch.cuda.HalfTensor if cuda else torch.Tensor
+
+class LambdaLR:
+    def __init__(self, n_epochs, offset, decay_start_epoch):
+        assert ((n_epochs - decay_start_epoch) > 0), "Decay must start before the training session ends!"
+        self.n_epochs = n_epochs
+        self.offset = offset
+        self.decay_start_epoch = decay_start_epoch
+
+    def step(self, epoch):
+        return 1.0 - max(0, epoch + self.offset - self.decay_start_epoch)/(self.n_epochs - self.decay_start_epoch)
 
 # Configure dataloaders
 transforms_ = [
