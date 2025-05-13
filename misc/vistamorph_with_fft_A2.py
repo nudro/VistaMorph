@@ -118,8 +118,9 @@ def speckle(image):
     # Convert to float and normalize
     img_float = image.float() / 255.0
     
-    # Generate Rayleigh noise
-    noise = torch.rayleigh(torch.ones_like(img_float) * 0.5)
+    # Generate Rayleigh noise using numpy
+    noise = np.random.rayleigh(0.5, size=image.shape)
+    noise = torch.from_numpy(noise).to(image.device)
     noise = noise / noise.max()  # Normalize noise
     
     # Apply multiplicative noise
