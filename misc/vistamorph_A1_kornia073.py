@@ -123,7 +123,8 @@ class Net(nn.Module):
             img_input = torch.cat((edge_A_expanded, edge_B_expanded), 1)  # [batch, 6, H, W]
             dtheta = self.stn_phi(img_input)
             
-            identity_theta = torch.tensor(identity_matrix, dtype=torch.float).cuda()
+            # Create identity matrix tensor on the same device and with the same type as dtheta
+            identity_theta = torch.tensor(identity_matrix, dtype=dtheta.dtype, device=dtheta.device)
             dtheta = dtheta.reshape(img_A.size(0), 2*3)
             theta = dtheta + identity_theta.unsqueeze(0).repeat(img_A.size(0),1)
 
@@ -295,57 +296,60 @@ def homog_loss(matches, kpts_warped, kpts_real, device):
     return F.mse_loss(src_pts, dst_pts)
 
 def adalam(warped_B, real_A, device, return_matches=False):
-    """
-    Match keypoints between warped and real images using AdaLAM.
+    """Perform keypoint detection and matching using KeyNet and AdaLAM.
     Args:
         warped_B: Warped image tensor [B, C, H, W]
         real_A: Real image tensor [B, C, H, W]
         device: Device to use for tensor operations
-        return_matches: Whether to return the matches
+        return_matches: Whether to return matches and keypoints for visualization
     Returns:
-        torch.Tensor: Mean squared error between matched points
-        Optional[List]: List of (src_idx, dst_idx) tuples if return_matches=True
+        If return_matches is False:
+            torch.Tensor: Homography loss
+        If return_matches is True:
+            tuple: (matches, kpts_warped, kpts_real)
     """
-    # Convert images to float32 for KeyNet compatibility
-    warped_B = warped_B.float()
-    real_A = real_A.float()
+    batch_size = warped_B.size(0)
+    keynet = kornia.feature.KeyNetDetector()
+    adalam_matcher = kornia.feature.AdaLAM()
     
-    # Initialize KeyNet
-    keynet = KF.KeyNetDetector(True).to(device)
+    # Initialize lists to store results for each image in batch
+    all_matches = []
+    all_kpts_warped = []
+    all_kpts_real = []
+    total_homog_loss = torch.tensor(0.0, device=device)
     
-    # Detect keypoints
-    with torch.no_grad():
-        lafs_warped, responses_warped = keynet(warped_B)
-        lafs_real, responses_real = keynet(real_A)
-    
-    # Extract keypoint coordinates
-    kpts_warped = lafs_warped[0, :, :, 2].detach()
-    kpts_real = lafs_real[0, :, :, 2].detach()
-    
-    # Initialize HardNet
-    hardnet = KF.HardNet(True).to(device)
-    
-    # Extract descriptors
-    with torch.no_grad():
-        desc_warped = hardnet(warped_B, lafs_warped)
-        desc_real = hardnet(real_A, lafs_real)
-    
-    # Match descriptors using AdaLAM
-    with torch.no_grad():
-        dists, idxs = KF.match_adalam(desc_warped, desc_real, lafs_warped, lafs_real)
-    
-    # Filter matches based on distance threshold
-    good_matches = []
-    for i, (dist, idx) in enumerate(zip(dists[0], idxs[0])):
-        if dist < 0.8:  # Distance threshold
-            good_matches.append((i, idx))
-    
-    # Compute homography loss
-    loss = homog_loss(good_matches, kpts_warped, kpts_real, device)
+    # Process each image in the batch
+    for i in range(batch_size):
+        # Get single images from batch
+        warped_B_single = warped_B[i:i+1]  # Keep batch dimension
+        real_A_single = real_A[i:i+1]      # Keep batch dimension
+        
+        # Convert to grayscale
+        warped_B_gray = kornia.color.rgb_to_grayscale(warped_B_single).float()
+        real_A_gray = kornia.color.rgb_to_grayscale(real_A_single).float()
+        
+        # Detect keypoints using KeyNet
+        kpts_warped, desc_warped = keynet(warped_B_gray)
+        kpts_real, desc_real = keynet(real_A_gray)
+        
+        # Match keypoints using AdaLAM
+        matches = adalam_matcher(desc_warped, desc_real, kpts_warped, kpts_real)
+        
+        if return_matches:
+            all_matches.append(matches)
+            all_kpts_warped.append(kpts_warped)
+            all_kpts_real.append(kpts_real)
+        else:
+            # Calculate homography loss for this image
+            homog_loss = homog_loss(matches, kpts_warped, kpts_real, device)
+            total_homog_loss += homog_loss
     
     if return_matches:
-        return loss, good_matches
-    return loss
+        # For visualization, return results from first image in batch
+        return all_matches[0], all_kpts_warped[0], all_kpts_real[0]
+    else:
+        # Return average homography loss across batch
+        return total_homog_loss / batch_size
 
 # Initialize model and optimizer
 model = Net()
