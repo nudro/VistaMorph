@@ -580,9 +580,9 @@ def loftr_feature_loss(img1, img2):
     Returns:
         loss: Combined LoFTR feature loss
     """
-    # Convert to grayscale for LoFTR
-    img1_gray = K.color.rgb_to_grayscale(img1)
-    img2_gray = K.color.rgb_to_grayscale(img2)
+    # Convert to grayscale for LoFTR and ensure FloatTensor
+    img1_gray = kornia.color.rgb_to_grayscale(img1).type(torch.cuda.FloatTensor)
+    img2_gray = kornia.color.rgb_to_grayscale(img2).type(torch.cuda.FloatTensor)
     
     # Initialize LoFTR matcher
     matcher = KF.LoFTR(pretrained='outdoor')
