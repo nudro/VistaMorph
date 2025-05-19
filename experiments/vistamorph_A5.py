@@ -567,19 +567,26 @@ def global_disc_loss(real_A, real_B, fake_img, mode):
 
     return loss_D
 
-def loftr_feature_loss(img1, img2):
+def loftr_feature_loss(img1, img2, epoch, max_epochs=210, min_matches=10, confidence_threshold=0.2):
     """
-    Calculate LoFTR feature loss between two images.
-    Combines:
-    1. Mean Euclidean Distance (MED)
-    2. Symmetric Transfer Error
-    3. Confidence-weighted Error
+    Calculate LoFTR feature loss between two images with warm-up and fallback mechanisms.
     Args:
         img1: First image tensor [1, 3, H, W]
         img2: Second image tensor [1, 3, H, W]
+        epoch: Current training epoch
+        max_epochs: Total number of epochs for warm-up
+        min_matches: Minimum number of matches required
+        confidence_threshold: Minimum confidence score for matches
     Returns:
-        loss: Combined LoFTR feature loss
+        loss: Combined LoFTR feature loss or fallback loss
     """
+    # Warm-up weight calculation (linear increase from 0 to 1 over first 20% of epochs)
+    warmup_epochs = int(max_epochs * 0.2)
+    if epoch < warmup_epochs:
+        weight = epoch / warmup_epochs
+    else:
+        weight = 1.0
+    
     # Convert to grayscale for LoFTR and ensure FloatTensor
     img1_gray = kornia.color.rgb_to_grayscale(img1).type(torch.cuda.FloatTensor)
     img2_gray = kornia.color.rgb_to_grayscale(img2).type(torch.cuda.FloatTensor)
@@ -610,14 +617,30 @@ def loftr_feature_loss(img1, img2):
     mkpts1_backward = features_backward['keypoints1']
     conf_backward = features_backward['confidence']
     
+    # Apply confidence threshold
+    forward_mask = conf_forward > confidence_threshold
+    backward_mask = conf_backward > confidence_threshold
+    
+    # Check if we have enough matches
+    if forward_mask.sum() < min_matches or backward_mask.sum() < min_matches:
+        # Fallback to L1 loss if not enough matches
+        return criterion_L1(img1, img2)
+    
+    # Filter matches by confidence
+    mkpts0_forward = mkpts0_forward[forward_mask]
+    mkpts1_forward = mkpts1_forward[forward_mask]
+    conf_forward = conf_forward[forward_mask]
+    
+    mkpts0_backward = mkpts0_backward[backward_mask]
+    mkpts1_backward = mkpts1_backward[backward_mask]
+    conf_backward = conf_backward[backward_mask]
+    
     # 1. Mean Euclidean Distance (MED)
     dist_forward = torch.norm(mkpts0_forward - mkpts1_forward, dim=1)
     dist_backward = torch.norm(mkpts0_backward - mkpts1_backward, dim=1)
     med_loss = (dist_forward.mean() + dist_backward.mean()) / 2
     
     # 2. Symmetric Transfer Error
-    # Find corresponding points in both directions
-    # This is a simplified version - in practice, you'd want to do proper point matching
     sym_error = torch.abs(dist_forward - dist_backward).mean()
     
     # 3. Confidence-weighted Error
@@ -625,8 +648,8 @@ def loftr_feature_loss(img1, img2):
     conf_weighted_backward = (conf_backward * dist_backward).sum() / conf_backward.sum()
     conf_weighted_loss = (conf_weighted_forward + conf_weighted_backward) / 2
     
-    # Combine losses with weights
-    total_loss = med_loss + 0.5 * sym_error + 0.5 * conf_weighted_loss
+    # Combine losses with weights and warm-up
+    total_loss = (med_loss + 0.5 * sym_error + 0.5 * conf_weighted_loss) * weight
     
     return total_loss
 
@@ -787,7 +810,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
             perc_loss = perc_A.mean()
 
             # Replace tie_error with LoFTR feature loss
-            loftr_loss = loftr_feature_loss(warped_B, real_A)
+            loftr_loss = loftr_feature_loss(warped_B, real_A, epoch, max_epochs=opt.n_epochs)
 
             # Adverarial ~ mode A goes to Discirminator 2
             loss_GAN = global_gen_loss(real_A, warped_B, fake_A2, mode='A') # need registered B <> real_A and registered B <> fake_A2 identifcal
