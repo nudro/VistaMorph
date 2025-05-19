@@ -26,6 +26,37 @@ from kornia import morphology as morph
 import kornia.contrib as K
 import matplotlib.pyplot as plt
 
+"""
+VistaMorph: Image Alignment and Generation with LoFTR Feature Matching
+
+Loss Function Overview:
+----------------------
+The model uses a combination of losses to ensure accurate image alignment and generation:
+
+1. LoFTR Feature Loss:
+   - Uses LoFTR (Local Feature TRansformer) for robust feature matching
+   - Implements a warm-up period (first 20% of epochs) to gradually introduce feature matching
+   - Only uses common matches between forward and backward directions for stability
+   - Falls back to L1 loss if insufficient matches are found
+   - Combines Mean Euclidean Distance (MED) and confidence-weighted error
+
+2. Reconstruction Loss (L1):
+   - Ensures pixel-level accuracy between generated and target images
+   - Used as fallback when LoFTR matching is insufficient
+
+3. Perceptual Loss (LPIPS):
+   - Maintains perceptual similarity between images
+   - Uses VGG features to compare high-level image characteristics
+
+4. Adversarial Loss:
+   - Ensures generated images are realistic
+   - Uses relativistic GAN approach
+
+The loss combination provides a balance between:
+- Precise feature alignment (LoFTR)
+- Overall image quality (L1 + LPIPS)
+- Realistic appearance (Adversarial)
+"""
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--epoch", type=int, default=0, help="epoch to start training from")
