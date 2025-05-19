@@ -163,8 +163,8 @@ def visualize_loftr_features(img1, img2, title, save_path):
     img2_np = (img2_np * 0.5 + 0.5) * 255
     
     # Convert to grayscale for LoFTR
-    img1_gray = K.color.rgb_to_grayscale(img1)
-    img2_gray = K.color.rgb_to_grayscale(img2)
+    img1_gray = kornia.color.rgb_to_grayscale(img1)
+    img2_gray = kornia.color.rgb_to_grayscale(img2)
     
     # Initialize LoFTR matcher
     matcher = KF.LoFTR(pretrained='outdoor')
