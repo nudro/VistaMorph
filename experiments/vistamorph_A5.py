@@ -166,8 +166,8 @@ def visualize_loftr_features(img1, img2, title, save_path):
     img1_gray = kornia.color.rgb_to_grayscale(img1).type(torch.cuda.FloatTensor)
     img2_gray = kornia.color.rgb_to_grayscale(img2).type(torch.cuda.FloatTensor)
     
-    # Initialize LoFTR matcher
-    matcher = KF.LoFTR(pretrained='outdoor')
+    # Initialize LoFTR matcher and move to GPU
+    matcher = KF.LoFTR(pretrained='outdoor').cuda()
     
     # Get correspondences
     input_dict = {
@@ -584,8 +584,8 @@ def loftr_feature_loss(img1, img2):
     img1_gray = kornia.color.rgb_to_grayscale(img1).type(torch.cuda.FloatTensor)
     img2_gray = kornia.color.rgb_to_grayscale(img2).type(torch.cuda.FloatTensor)
     
-    # Initialize LoFTR matcher
-    matcher = KF.LoFTR(pretrained='outdoor')
+    # Initialize LoFTR matcher and move to GPU
+    matcher = KF.LoFTR(pretrained='outdoor').cuda()
     
     # Get correspondences in both directions
     input_dict_forward = {
