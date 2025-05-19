@@ -93,6 +93,57 @@ def expand(tensor):
     return t
 
 
+def visualize_tiepoints(img1, img2, source_points, target_points, title, save_path):
+    """
+    Visualize tiepoints between two images.
+    Args:
+        img1: First image tensor [1, 3, H, W]
+        img2: Second image tensor [1, 3, H, W]
+        source_points: Source points tensor [4, 2]
+        target_points: Target points tensor [4, 2]
+        title: Title for the plot
+        save_path: Path to save the visualization
+    """
+    # Convert tensors to numpy arrays
+    img1_np = img1.squeeze(0).cpu().numpy().transpose(1, 2, 0)
+    img2_np = img2.squeeze(0).cpu().numpy().transpose(1, 2, 0)
+    
+    # Denormalize images
+    img1_np = (img1_np * 0.5 + 0.5) * 255
+    img2_np = (img2_np * 0.5 + 0.5) * 255
+    
+    # Convert points to numpy arrays
+    source_points = source_points.squeeze(0).cpu().numpy()
+    target_points = target_points.squeeze(0).cpu().numpy()
+    
+    # Create figure
+    plt.figure(figsize=(12, 6))
+    
+    # Plot images side by side
+    plt.subplot(121)
+    plt.imshow(img1_np.astype(np.uint8))
+    plt.title('Source Image')
+    plt.axis('off')
+    
+    plt.subplot(122)
+    plt.imshow(img2_np.astype(np.uint8))
+    plt.title('Target Image')
+    plt.axis('off')
+    
+    # Plot tiepoints and connections
+    colors = ['red', 'green', 'blue', 'yellow']
+    for i in range(4):
+        # Plot points
+        plt.subplot(121)
+        plt.scatter(source_points[i, 0], source_points[i, 1], c=colors[i], marker='o', s=100)
+        
+        plt.subplot(122)
+        plt.scatter(target_points[i, 0], target_points[i, 1], c=colors[i], marker='o', s=100)
+    
+    plt.suptitle(title)
+    plt.savefig(save_path)
+    plt.close()
+
 def sample_images(batches_done):
     imgs = next(iter(test_dataloader)) # batch_size = 1
     real_A = Variable(imgs["A"].type(HalfTensor)) # torch.Size([1, 3, 256, 256])
@@ -102,10 +153,26 @@ def sample_images(batches_done):
 
     # pass to generator 2 for fake_A
     warped_B, theta = model(img_A=real_A, img_B=fake_A, src=real_B)
-    print(warped_B.size())
     fake_A2 = generator2(warped_B)
 
-    visualize_matches(real_A, real_B, warped_B, matches, kpts_warped, kpts_real, i)
+    # Get tiepoints for visualization
+    source_points, target_points = affine_to_tiepoints(theta.view(-1, 2, 3))
+    
+    # Visualize tiepoints for original pair
+    visualize_tiepoints(
+        real_A, real_B,
+        source_points, target_points,
+        'Original Pair Tiepoints',
+        f"./images/{opt.experiment}/tiepoints_original_{batches_done}.png"
+    )
+    
+    # Visualize tiepoints for warped pair
+    visualize_tiepoints(
+        real_A, warped_B,
+        source_points, target_points,
+        'Warped Pair Tiepoints',
+        f"./images/{opt.experiment}/tiepoints_warped_{batches_done}.png"
+    )
     
     img_sample_global = torch.cat((real_A.data, real_B.data, fake_A2.data, warped_B.data, fake_A.data), -1)
     save_image(img_sample_global, "./images/%s/%s.png" % (opt.experiment, batches_done), nrow=4, normalize=True)
