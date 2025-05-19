@@ -156,8 +156,8 @@ def visualize_loftr_features(img1, img2, title, save_path):
         features: Dictionary containing LoFTR features
     """
     # Convert tensors to numpy arrays and denormalize
-    img1_np = img1.squeeze(0).cpu().numpy().transpose(1, 2, 0)
-    img2_np = img2.squeeze(0).cpu().numpy().transpose(1, 2, 0)
+    img1_np = img1.squeeze(0).detach().cpu().numpy().transpose(1, 2, 0)
+    img2_np = img2.squeeze(0).detach().cpu().numpy().transpose(1, 2, 0)
     
     img1_np = (img1_np * 0.5 + 0.5) * 255
     img2_np = (img2_np * 0.5 + 0.5) * 255
@@ -179,8 +179,8 @@ def visualize_loftr_features(img1, img2, title, save_path):
         features = matcher(input_dict)
     
     # Convert keypoints to numpy
-    mkpts0 = features['keypoints0'].cpu().numpy()
-    mkpts1 = features['keypoints1'].cpu().numpy()
+    mkpts0 = features['keypoints0'].detach().cpu().numpy()
+    mkpts1 = features['keypoints1'].detach().cpu().numpy()
     
     # Create visualization
     plt.figure(figsize=(12, 6))
