@@ -570,6 +570,7 @@ def global_disc_loss(real_A, real_B, fake_img, mode):
 def loftr_feature_loss(img1, img2, epoch, max_epochs=210, min_matches=10, confidence_threshold=0.2):
     """
     Calculate LoFTR feature loss between two images with warm-up and fallback mechanisms.
+    Uses only common matches between forward and backward directions for more robust loss.
     Args:
         img1: First image tensor [1, 3, H, W]
         img2: Second image tensor [1, 3, H, W]
@@ -621,11 +622,6 @@ def loftr_feature_loss(img1, img2, epoch, max_epochs=210, min_matches=10, confid
     forward_mask = conf_forward > confidence_threshold
     backward_mask = conf_backward > confidence_threshold
     
-    # Check if we have enough matches
-    if forward_mask.sum() < min_matches or backward_mask.sum() < min_matches:
-        # Fallback to L1 loss if not enough matches
-        return criterion_L1(img1, img2)
-    
     # Filter matches by confidence
     mkpts0_forward = mkpts0_forward[forward_mask]
     mkpts1_forward = mkpts1_forward[forward_mask]
@@ -635,21 +631,41 @@ def loftr_feature_loss(img1, img2, epoch, max_epochs=210, min_matches=10, confid
     mkpts1_backward = mkpts1_backward[backward_mask]
     conf_backward = conf_backward[backward_mask]
     
+    # Find common matches between forward and backward directions
+    # Convert keypoints to numpy for easier comparison
+    mkpts0_forward_np = mkpts0_forward.cpu().numpy()
+    mkpts1_forward_np = mkpts1_forward.cpu().numpy()
+    mkpts0_backward_np = mkpts0_backward.cpu().numpy()
+    mkpts1_backward_np = mkpts1_backward.cpu().numpy()
+    
+    # Find common matches using a distance threshold
+    common_matches = []
+    for i, (pt0_f, pt1_f) in enumerate(zip(mkpts0_forward_np, mkpts1_forward_np)):
+        for j, (pt0_b, pt1_b) in enumerate(zip(mkpts0_backward_np, mkpts1_backward_np)):
+            # Check if points are close in both images
+            if (np.linalg.norm(pt0_f - pt1_b) < 1.0 and 
+                np.linalg.norm(pt1_f - pt0_b) < 1.0):
+                common_matches.append(i)
+                break
+    
+    if len(common_matches) < min_matches:
+        # Fallback to L1 loss if not enough common matches
+        return criterion_L1(img1, img2)
+    
+    # Use only common matches
+    mkpts0_common = mkpts0_forward[common_matches]
+    mkpts1_common = mkpts1_forward[common_matches]
+    conf_common = conf_forward[common_matches]
+    
     # 1. Mean Euclidean Distance (MED)
-    dist_forward = torch.norm(mkpts0_forward - mkpts1_forward, dim=1)
-    dist_backward = torch.norm(mkpts0_backward - mkpts1_backward, dim=1)
-    med_loss = (dist_forward.mean() + dist_backward.mean()) / 2
+    dist = torch.norm(mkpts0_common - mkpts1_common, dim=1)
+    med_loss = dist.mean()
     
-    # 2. Symmetric Transfer Error
-    sym_error = torch.abs(dist_forward - dist_backward).mean()
-    
-    # 3. Confidence-weighted Error
-    conf_weighted_forward = (conf_forward * dist_forward).sum() / conf_forward.sum()
-    conf_weighted_backward = (conf_backward * dist_backward).sum() / conf_backward.sum()
-    conf_weighted_loss = (conf_weighted_forward + conf_weighted_backward) / 2
+    # 2. Confidence-weighted Error
+    conf_weighted_loss = (conf_common * dist).sum() / conf_common.sum()
     
     # Combine losses with weights and warm-up
-    total_loss = (med_loss + 0.5 * sym_error + 0.5 * conf_weighted_loss) * weight
+    total_loss = (med_loss + 0.5 * conf_weighted_loss) * weight
     
     return total_loss
 
