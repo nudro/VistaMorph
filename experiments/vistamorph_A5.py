@@ -144,6 +144,77 @@ def visualize_tiepoints(img1, img2, source_points, target_points, title, save_pa
     plt.savefig(save_path)
     plt.close()
 
+def visualize_loftr_features(img1, img2, title, save_path):
+    """
+    Visualize LoFTR features between two images.
+    Args:
+        img1: First image tensor [1, 3, H, W]
+        img2: Second image tensor [1, 3, H, W]
+        title: Title for the plot
+        save_path: Path to save the visualization
+    Returns:
+        features: Dictionary containing LoFTR features
+    """
+    # Convert tensors to numpy arrays and denormalize
+    img1_np = img1.squeeze(0).cpu().numpy().transpose(1, 2, 0)
+    img2_np = img2.squeeze(0).cpu().numpy().transpose(1, 2, 0)
+    
+    img1_np = (img1_np * 0.5 + 0.5) * 255
+    img2_np = (img2_np * 0.5 + 0.5) * 255
+    
+    # Convert to grayscale for LoFTR
+    img1_gray = K.color.rgb_to_grayscale(img1)
+    img2_gray = K.color.rgb_to_grayscale(img2)
+    
+    # Initialize LoFTR matcher
+    matcher = KF.LoFTR(pretrained='outdoor')
+    
+    # Get correspondences
+    input_dict = {
+        "image0": img1_gray,
+        "image1": img2_gray
+    }
+    
+    with torch.no_grad():
+        features = matcher(input_dict)
+    
+    # Convert keypoints to numpy
+    mkpts0 = features['keypoints0'].cpu().numpy()
+    mkpts1 = features['keypoints1'].cpu().numpy()
+    
+    # Create visualization
+    plt.figure(figsize=(12, 6))
+    
+    # Plot images side by side
+    plt.subplot(121)
+    plt.imshow(img1_np.astype(np.uint8))
+    plt.title('Source Image')
+    plt.axis('off')
+    
+    plt.subplot(122)
+    plt.imshow(img2_np.astype(np.uint8))
+    plt.title('Target Image')
+    plt.axis('off')
+    
+    # Plot keypoints and connections
+    plt.subplot(121)
+    plt.scatter(mkpts0[:, 0], mkpts0[:, 1], c='red', marker='.', s=1)
+    
+    plt.subplot(122)
+    plt.scatter(mkpts1[:, 0], mkpts1[:, 1], c='red', marker='.', s=1)
+    
+    # Draw lines between corresponding points
+    for i in range(len(mkpts0)):
+        plt.plot([mkpts0[i, 0], mkpts1[i, 0]], 
+                [mkpts0[i, 1], mkpts1[i, 1]], 
+                'c-', alpha=0.3, linewidth=0.5)
+    
+    plt.suptitle(title)
+    plt.savefig(save_path)
+    plt.close()
+    
+    return features
+
 def sample_images(batches_done):
     imgs = next(iter(test_dataloader)) # batch_size = 1
     real_A = Variable(imgs["A"].type(HalfTensor)) # torch.Size([1, 3, 256, 256])
@@ -155,24 +226,23 @@ def sample_images(batches_done):
     warped_B, theta = model(img_A=real_A, img_B=fake_A, src=real_B)
     fake_A2 = generator2(warped_B)
 
-    # Get tiepoints for visualization
-    source_points, target_points = affine_to_tiepoints(theta.view(-1, 2, 3))
-    
-    # Visualize tiepoints for original pair
-    visualize_tiepoints(
+    # Get LoFTR features and visualize for original pair
+    original_features = visualize_loftr_features(
         real_A, real_B,
-        source_points, target_points,
-        'Original Pair Tiepoints',
-        f"./images/{opt.experiment}/tiepoints_original_{batches_done}.png"
+        'Original Pair LoFTR Features',
+        f"./images/{opt.experiment}/loftr_original_{batches_done}.png"
     )
     
-    # Visualize tiepoints for warped pair
-    visualize_tiepoints(
+    # Get LoFTR features and visualize for warped pair
+    warped_features = visualize_loftr_features(
         real_A, warped_B,
-        source_points, target_points,
-        'Warped Pair Tiepoints',
-        f"./images/{opt.experiment}/tiepoints_warped_{batches_done}.png"
+        'Warped Pair LoFTR Features',
+        f"./images/{opt.experiment}/loftr_warped_{batches_done}.png"
     )
+    
+    # Print feature statistics
+    print(f"Original pair features: {len(original_features['keypoints0'])} matches")
+    print(f"Warped pair features: {len(warped_features['keypoints0'])} matches")
     
     img_sample_global = torch.cat((real_A.data, real_B.data, fake_A2.data, warped_B.data, fake_A.data), -1)
     save_image(img_sample_global, "./images/%s/%s.png" % (opt.experiment, batches_done), nrow=4, normalize=True)
@@ -497,6 +567,68 @@ def global_disc_loss(real_A, real_B, fake_img, mode):
 
     return loss_D
 
+def loftr_feature_loss(img1, img2):
+    """
+    Calculate LoFTR feature loss between two images.
+    Combines:
+    1. Mean Euclidean Distance (MED)
+    2. Symmetric Transfer Error
+    3. Confidence-weighted Error
+    Args:
+        img1: First image tensor [1, 3, H, W]
+        img2: Second image tensor [1, 3, H, W]
+    Returns:
+        loss: Combined LoFTR feature loss
+    """
+    # Convert to grayscale for LoFTR
+    img1_gray = K.color.rgb_to_grayscale(img1)
+    img2_gray = K.color.rgb_to_grayscale(img2)
+    
+    # Initialize LoFTR matcher
+    matcher = KF.LoFTR(pretrained='outdoor')
+    
+    # Get correspondences in both directions
+    input_dict_forward = {
+        "image0": img1_gray,
+        "image1": img2_gray
+    }
+    input_dict_backward = {
+        "image0": img2_gray,
+        "image1": img1_gray
+    }
+    
+    with torch.no_grad():
+        features_forward = matcher(input_dict_forward)
+        features_backward = matcher(input_dict_backward)
+    
+    # Get keypoints and confidence scores
+    mkpts0_forward = features_forward['keypoints0']
+    mkpts1_forward = features_forward['keypoints1']
+    conf_forward = features_forward['confidence']
+    
+    mkpts0_backward = features_backward['keypoints0']
+    mkpts1_backward = features_backward['keypoints1']
+    conf_backward = features_backward['confidence']
+    
+    # 1. Mean Euclidean Distance (MED)
+    dist_forward = torch.norm(mkpts0_forward - mkpts1_forward, dim=1)
+    dist_backward = torch.norm(mkpts0_backward - mkpts1_backward, dim=1)
+    med_loss = (dist_forward.mean() + dist_backward.mean()) / 2
+    
+    # 2. Symmetric Transfer Error
+    # Find corresponding points in both directions
+    # This is a simplified version - in practice, you'd want to do proper point matching
+    sym_error = torch.abs(dist_forward - dist_backward).mean()
+    
+    # 3. Confidence-weighted Error
+    conf_weighted_forward = (conf_forward * dist_forward).sum() / conf_forward.sum()
+    conf_weighted_backward = (conf_backward * dist_backward).sum() / conf_backward.sum()
+    conf_weighted_loss = (conf_weighted_forward + conf_weighted_backward) / 2
+    
+    # Combine losses with weights
+    total_loss = med_loss + 0.5 * sym_error + 0.5 * conf_weighted_loss
+    
+    return total_loss
 
 # ===========================================================
 # Initialize generator and discriminator
@@ -515,8 +647,8 @@ if cuda:
     criterion_GAN.cuda()
     criterion_L1.cuda()
     criterion_lpips.cuda()
-    criterion_amp.cuda()
-    criterion_phase.cuda()
+    #criterion_amp.cuda()
+    #criterion_phase.cuda()
 
 # Trained on multigpus - change your device ids if needed
 generator2 = torch.nn.DataParallel(generator2, device_ids=[0, 1])
@@ -654,28 +786,17 @@ for epoch in range(opt.epoch, opt.n_epochs):
             perc_A = criterion_lpips(fake_A2, real_A)
             perc_loss = perc_A.mean()
 
-            # Convert theta to tiepoints for visualization
-            pred_source, pred_target = affine_to_tiepoints(theta.view(-1, 2, 3))
-            gt_source, gt_target = affine_to_tiepoints(Y.view(-1, 2, 3))
-
-            print("---------------------")
-            print("---theta---: {}".format(theta))
-            print("Y------: {}".format(Y))
-            print("pred_target: {}".format(pred_target))
-            print("gt_target: {}".format(gt_target))
-            print("---------------------")
-            
-            # Calculate tiepoint error
-            tie_error = criterion_L1(pred_target, gt_target)
+            # Replace tie_error with LoFTR feature loss
+            loftr_loss = loftr_feature_loss(warped_B, real_A)
 
             # Adverarial ~ mode A goes to Discirminator 2
-            loss_GAN2 = global_gen_loss(real_A, warped_B, fake_A2, mode='A') # need registered B <> real_A and registered B <> fake_A2 identifcal
-            loss_GAN = loss_GAN2
+            loss_GAN = global_gen_loss(real_A, warped_B, fake_A2, mode='A') # need registered B <> real_A and registered B <> fake_A2 identifcal
+
 
             # Total Loss
             alpha1 = 0.001
             alpha2 = 0.25
-            loss_G = (loss_GAN + tie_error + perc_loss + recon_loss).mean()
+            loss_G = (loss_GAN + loftr_loss + perc_loss + recon_loss).mean()
 
         scaler.scale(loss_G).backward()
         scaler.step(optimizer_G)
@@ -708,7 +829,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
         # Print log
         sys.stdout.write(
-            "\r[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f, R(L1): %f, Perc(L1): %f, Tie: %f] ETA: %s"
+            "\r[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f, R(L1): %f, Perc(L1): %f, LoFTR: %f] ETA: %s"
             % (
                 epoch, #%d
                 opt.n_epochs, #%d
@@ -718,14 +839,13 @@ for epoch in range(opt.epoch, opt.n_epochs):
                 loss_G.item(), #%f - total G loss
                 recon_loss.item(),
                 perc_loss.item(),
-                tie_error.item(),
-                #loss_FFT.item(),
+                loftr_loss.item(),
                 time_left, #%s
             )
         )
 
         f.write(
-           "\r[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f, R(L1): %f, Perc(L1): %f, Tie: %f] ETA: %s"
+           "\r[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f, R(L1): %f, Perc(L1): %f, LoFTR: %f] ETA: %s"
             % (
                 epoch, #%d
                 opt.n_epochs, #%d
@@ -735,8 +855,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
                 loss_G.item(), #%f - total G loss
                 recon_loss.item(),
                 perc_loss.item(),
-                tie_error.item(),
-                #loss_FFT.item(),
+                loftr_loss.item(),
                 time_left, #%s
             )
         )
