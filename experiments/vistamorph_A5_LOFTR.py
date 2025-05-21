@@ -277,7 +277,7 @@ def sample_images(batches_done):
         idx,
         kornia.tensor_to_image(real_A.cpu()),  # Move to CPU before conversion
         kornia.tensor_to_image(real_B.cpu()),  # Move to CPU before conversion
-        torch.ones(mkpts0.shape[0], dtype=torch.bool, device='cuda'),  # Ensure on GPU
+        torch.ones(mkpts0.shape[0], dtype=torch.bool, device='cuda').cpu(),  # Move to CPU before passing to draw_LAF_matches
         draw_dict={
             "inlier_color": (0.2, 1, 0.2),
             "tentative_color": (1.0, 0.5, 1),
