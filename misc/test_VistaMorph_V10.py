@@ -59,7 +59,10 @@ def edge_detection(img):
     laplacian = kornia.filters.laplacian(gray, kernel_size=3)
     
     # Combine and normalize
-    return torch.clamp(canny + laplacian, 0, 1)
+    edge_map = torch.clamp(canny + laplacian, 0, 1)
+    
+    # Ensure output has same batch size as input
+    return edge_map[:img.size(0)]
 
 ######################
 # Model Architecture
