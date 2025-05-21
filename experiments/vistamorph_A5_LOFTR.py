@@ -255,6 +255,9 @@ def sample_images(batches_done):
     
     # Check if we have any matches
     if len(mkpts0) > 0:
+        print(f"\nNumber of matches found: {len(mkpts0)}")
+        print(f"mkpts0 shape: {mkpts0.shape}, mkpts1 shape: {mkpts1.shape}")
+        
         # Convert to LAF format for visualization
         laf0 = KF.laf_from_center_scale_ori(
             mkpts0.view(1, -1, 2),
@@ -268,8 +271,11 @@ def sample_images(batches_done):
             torch.ones(mkpts1.shape[0], device='cuda').view(1, -1, 1)      # Ensure on GPU
         )
         
+        print(f"LAF shapes - laf0: {laf0.shape}, laf1: {laf1.shape}")
+        
         # Create indices for matches
         idx = torch.arange(mkpts0.shape[0], device='cuda').view(-1, 1).repeat(1, 2)  # Ensure on GPU
+        print(f"Match indices shape: {idx.shape}")
         
         # Move all tensors to CPU before visualization
         laf0 = laf0.cpu()
@@ -277,11 +283,15 @@ def sample_images(batches_done):
         idx = idx.cpu()
         
         # Normalize images from [-1,1] to [0,1] range and convert to numpy
+        print(f"\nOriginal tensor shapes - real_A: {real_A.shape}, real_B: {real_B.shape}")
         img1 = ((real_A.cpu() + 1) / 2).permute(1, 2, 0).numpy()
         img2 = ((real_B.cpu() + 1) / 2).permute(1, 2, 0).numpy()
+        print(f"Converted numpy array shapes - img1: {img1.shape}, img2: {img2.shape}")
+        print(f"Image value ranges - img1: [{img1.min():.3f}, {img1.max():.3f}], img2: [{img2.min():.3f}, {img2.max():.3f}]")
         
         # Draw matches
         plt.figure(figsize=(12, 6))
+        print("\nDrawing matches with draw_LAF_matches...")
         draw_LAF_matches(
             laf0,
             laf1,
@@ -297,12 +307,16 @@ def sample_images(batches_done):
             }
         )
     else:
+        print("\nNo matches found, displaying side-by-side images")
         # If no matches, just show the images side by side
         plt.figure(figsize=(12, 6))
         
         # Normalize images from [-1,1] to [0,1] range and convert to numpy
+        print(f"\nOriginal tensor shapes - real_A: {real_A.shape}, real_B: {real_B.shape}")
         img1 = ((real_A.cpu() + 1) / 2).permute(1, 2, 0).numpy()
         img2 = ((real_B.cpu() + 1) / 2).permute(1, 2, 0).numpy()
+        print(f"Converted numpy array shapes - img1: {img1.shape}, img2: {img2.shape}")
+        print(f"Image value ranges - img1: [{img1.min():.3f}, {img1.max():.3f}], img2: [{img2.min():.3f}, {img2.max():.3f}]")
         
         plt.subplot(121)
         plt.imshow(img1)
@@ -314,8 +328,10 @@ def sample_images(batches_done):
         plt.title('Target Image')
         plt.axis('off')
     
+    print(f"\nSaving visualization to ./images/{opt.experiment}/matches_{batches_done}.png")
     plt.savefig(f"./images/{opt.experiment}/matches_{batches_done}.png")
     plt.close()
+    print("Visualization complete\n")
 
 
 
