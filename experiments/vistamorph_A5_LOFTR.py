@@ -276,9 +276,9 @@ def sample_images(batches_done):
         laf1 = laf1.cpu()
         idx = idx.cpu()
         
-        # Normalize images from [-1,1] to [0,1] range
-        img1 = (real_A.cpu() + 1) / 2
-        img2 = (real_B.cpu() + 1) / 2
+        # Normalize images from [-1,1] to [0,1] range and convert to numpy
+        img1 = ((real_A.cpu() + 1) / 2).permute(1, 2, 0).numpy()
+        img2 = ((real_B.cpu() + 1) / 2).permute(1, 2, 0).numpy()
         
         # Draw matches
         plt.figure(figsize=(12, 6))
@@ -286,8 +286,8 @@ def sample_images(batches_done):
             laf0,
             laf1,
             idx,
-            kornia.tensor_to_image(img1),  # Use normalized images
-            kornia.tensor_to_image(img2),  # Use normalized images
+            img1,  # Use numpy array directly
+            img2,  # Use numpy array directly
             torch.ones(mkpts0.shape[0], dtype=torch.bool, device='cuda').cpu(),  # Move to CPU before passing to draw_LAF_matches
             draw_dict={
                 "inlier_color": (0.2, 1, 0.2),
@@ -300,17 +300,17 @@ def sample_images(batches_done):
         # If no matches, just show the images side by side
         plt.figure(figsize=(12, 6))
         
-        # Normalize images from [-1,1] to [0,1] range
-        img1 = (real_A.cpu() + 1) / 2
-        img2 = (real_B.cpu() + 1) / 2
+        # Normalize images from [-1,1] to [0,1] range and convert to numpy
+        img1 = ((real_A.cpu() + 1) / 2).permute(1, 2, 0).numpy()
+        img2 = ((real_B.cpu() + 1) / 2).permute(1, 2, 0).numpy()
         
         plt.subplot(121)
-        plt.imshow(kornia.tensor_to_image(img1))
+        plt.imshow(img1)
         plt.title('Source Image')
         plt.axis('off')
         
         plt.subplot(122)
-        plt.imshow(kornia.tensor_to_image(img2))
+        plt.imshow(img2)
         plt.title('Target Image')
         plt.axis('off')
     
