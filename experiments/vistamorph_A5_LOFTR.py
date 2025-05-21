@@ -284,10 +284,11 @@ def sample_images(batches_done):
         
         # Normalize images from [-1,1] to [0,1] range and convert to numpy
         print(f"\nOriginal tensor shapes - real_A: {real_A.shape}, real_B: {real_B.shape}")
-        img1 = ((real_A.cpu().squeeze(0) + 1) / 2).permute(1, 2, 0).numpy()  # Remove batch dimension with squeeze(0)
-        img2 = ((real_B.cpu().squeeze(0) + 1) / 2).permute(1, 2, 0).numpy()  # Remove batch dimension with squeeze(0)
+        img1 = ((real_A.cpu().squeeze(0) + 1) / 2).permute(1, 2, 0).numpy().astype(np.float32)  # Ensure float32
+        img2 = ((real_B.cpu().squeeze(0) + 1) / 2).permute(1, 2, 0).numpy().astype(np.float32)  # Ensure float32
         print(f"Converted numpy array shapes - img1: {img1.shape}, img2: {img2.shape}")
         print(f"Image value ranges - img1: [{img1.min():.3f}, {img1.max():.3f}], img2: [{img2.min():.3f}, {img2.max():.3f}]")
+        print(f"Image dtypes - img1: {img1.dtype}, img2: {img2.dtype}")
         
         # Draw matches
         plt.figure(figsize=(12, 6))
@@ -313,10 +314,11 @@ def sample_images(batches_done):
         
         # Normalize images from [-1,1] to [0,1] range and convert to numpy
         print(f"\nOriginal tensor shapes - real_A: {real_A.shape}, real_B: {real_B.shape}")
-        img1 = ((real_A.cpu().squeeze(0) + 1) / 2).permute(1, 2, 0).numpy()  # Remove batch dimension with squeeze(0)
-        img2 = ((real_B.cpu().squeeze(0) + 1) / 2).permute(1, 2, 0).numpy()  # Remove batch dimension with squeeze(0)
+        img1 = ((real_A.cpu().squeeze(0) + 1) / 2).permute(1, 2, 0).numpy().astype(np.float32)  # Ensure float32
+        img2 = ((real_B.cpu().squeeze(0) + 1) / 2).permute(1, 2, 0).numpy().astype(np.float32)  # Ensure float32
         print(f"Converted numpy array shapes - img1: {img1.shape}, img2: {img2.shape}")
         print(f"Image value ranges - img1: [{img1.min():.3f}, {img1.max():.3f}], img2: [{img2.min():.3f}, {img2.max():.3f}]")
+        print(f"Image dtypes - img1: {img1.dtype}, img2: {img2.dtype}")
         
         plt.subplot(121)
         plt.imshow(img1)
@@ -329,7 +331,7 @@ def sample_images(batches_done):
         plt.axis('off')
     
     print(f"\nSaving visualization to ./images/{opt.experiment}/matches_{batches_done}.png")
-    plt.savefig(f"./images/{opt.experiment}/matches_{batches_done}.png")
+    plt.savefig(f"./images/{opt.experiment}/matches_{batches_done}.png", dpi=300, bbox_inches='tight')
     plt.close()
     print("Visualization complete\n")
 
