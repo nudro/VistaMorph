@@ -250,24 +250,24 @@ def sample_images(batches_done):
     save_image(img_sample_global, "./images/%s/%s.png" % (opt.experiment, batches_done), nrow=4, normalize=True)
     
     # Create and save match visualization using Kornia's tools
-    mkpts0 = original_features['keypoints0']
-    mkpts1 = original_features['keypoints1']
+    mkpts0 = original_features['keypoints0'].cuda()  # Ensure on GPU
+    mkpts1 = original_features['keypoints1'].cuda()  # Ensure on GPU
     
     # Convert to LAF format for visualization
     laf0 = KF.laf_from_center_scale_ori(
         mkpts0.view(1, -1, 2),
-        torch.ones(mkpts0.shape[0]).view(1, -1, 1, 1),
-        torch.ones(mkpts0.shape[0]).view(1, -1, 1)
+        torch.ones(mkpts0.shape[0], device='cuda').view(1, -1, 1, 1),  # Ensure on GPU
+        torch.ones(mkpts0.shape[0], device='cuda').view(1, -1, 1)      # Ensure on GPU
     )
     
     laf1 = KF.laf_from_center_scale_ori(
         mkpts1.view(1, -1, 2),
-        torch.ones(mkpts1.shape[0]).view(1, -1, 1, 1),
-        torch.ones(mkpts1.shape[0]).view(1, -1, 1)
+        torch.ones(mkpts1.shape[0], device='cuda').view(1, -1, 1, 1),  # Ensure on GPU
+        torch.ones(mkpts1.shape[0], device='cuda').view(1, -1, 1)      # Ensure on GPU
     )
     
     # Create indices for matches
-    idx = torch.arange(mkpts0.shape[0]).view(-1, 1).repeat(1, 2)
+    idx = torch.arange(mkpts0.shape[0], device='cuda').view(-1, 1).repeat(1, 2)  # Ensure on GPU
     
     # Draw matches
     plt.figure(figsize=(12, 6))
@@ -277,7 +277,7 @@ def sample_images(batches_done):
         idx,
         K.tensor_to_image(real_A),
         K.tensor_to_image(real_B),
-        torch.ones(mkpts0.shape[0], dtype=torch.bool),  # All matches are considered inliers
+        torch.ones(mkpts0.shape[0], dtype=torch.bool, device='cuda'),  # Ensure on GPU
         draw_dict={
             "inlier_color": (0.2, 1, 0.2),
             "tentative_color": (1.0, 0.5, 1),
