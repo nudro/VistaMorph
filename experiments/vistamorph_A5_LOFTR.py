@@ -253,43 +253,58 @@ def sample_images(batches_done):
     mkpts0 = original_features['keypoints0'].cuda()  # Ensure on GPU
     mkpts1 = original_features['keypoints1'].cuda()  # Ensure on GPU
     
-    # Convert to LAF format for visualization
-    laf0 = KF.laf_from_center_scale_ori(
-        mkpts0.view(1, -1, 2),
-        torch.ones(mkpts0.shape[0], device='cuda').view(1, -1, 1, 1),  # Ensure on GPU
-        torch.ones(mkpts0.shape[0], device='cuda').view(1, -1, 1)      # Ensure on GPU
-    )
+    # Check if we have any matches
+    if len(mkpts0) > 0:
+        # Convert to LAF format for visualization
+        laf0 = KF.laf_from_center_scale_ori(
+            mkpts0.view(1, -1, 2),
+            torch.ones(mkpts0.shape[0], device='cuda').view(1, -1, 1, 1),  # Ensure on GPU
+            torch.ones(mkpts0.shape[0], device='cuda').view(1, -1, 1)      # Ensure on GPU
+        )
+        
+        laf1 = KF.laf_from_center_scale_ori(
+            mkpts1.view(1, -1, 2),
+            torch.ones(mkpts1.shape[0], device='cuda').view(1, -1, 1, 1),  # Ensure on GPU
+            torch.ones(mkpts1.shape[0], device='cuda').view(1, -1, 1)      # Ensure on GPU
+        )
+        
+        # Create indices for matches
+        idx = torch.arange(mkpts0.shape[0], device='cuda').view(-1, 1).repeat(1, 2)  # Ensure on GPU
+        
+        # Move all tensors to CPU before visualization
+        laf0 = laf0.cpu()
+        laf1 = laf1.cpu()
+        idx = idx.cpu()
+        
+        # Draw matches
+        plt.figure(figsize=(12, 6))
+        draw_LAF_matches(
+            laf0,
+            laf1,
+            idx,
+            kornia.tensor_to_image(real_A.cpu()),  # Move to CPU before conversion
+            kornia.tensor_to_image(real_B.cpu()),  # Move to CPU before conversion
+            torch.ones(mkpts0.shape[0], dtype=torch.bool, device='cuda').cpu(),  # Move to CPU before passing to draw_LAF_matches
+            draw_dict={
+                "inlier_color": (0.2, 1, 0.2),
+                "tentative_color": (1.0, 0.5, 1),
+                "feature_color": (0.2, 0.5, 1),
+                "vertical": False
+            }
+        )
+    else:
+        # If no matches, just show the images side by side
+        plt.figure(figsize=(12, 6))
+        plt.subplot(121)
+        plt.imshow(kornia.tensor_to_image(real_A.cpu()))
+        plt.title('Source Image')
+        plt.axis('off')
+        
+        plt.subplot(122)
+        plt.imshow(kornia.tensor_to_image(real_B.cpu()))
+        plt.title('Target Image')
+        plt.axis('off')
     
-    laf1 = KF.laf_from_center_scale_ori(
-        mkpts1.view(1, -1, 2),
-        torch.ones(mkpts1.shape[0], device='cuda').view(1, -1, 1, 1),  # Ensure on GPU
-        torch.ones(mkpts1.shape[0], device='cuda').view(1, -1, 1)      # Ensure on GPU
-    )
-    
-    # Create indices for matches
-    idx = torch.arange(mkpts0.shape[0], device='cuda').view(-1, 1).repeat(1, 2)  # Ensure on GPU
-    
-    # Move all tensors to CPU before visualization
-    laf0 = laf0.cpu()
-    laf1 = laf1.cpu()
-    idx = idx.cpu()
-    
-    # Draw matches
-    plt.figure(figsize=(12, 6))
-    draw_LAF_matches(
-        laf0,
-        laf1,
-        idx,
-        kornia.tensor_to_image(real_A.cpu()),  # Move to CPU before conversion
-        kornia.tensor_to_image(real_B.cpu()),  # Move to CPU before conversion
-        torch.ones(mkpts0.shape[0], dtype=torch.bool, device='cuda').cpu(),  # Move to CPU before passing to draw_LAF_matches
-        draw_dict={
-            "inlier_color": (0.2, 1, 0.2),
-            "tentative_color": (1.0, 0.5, 1),
-            "feature_color": (0.2, 0.5, 1),
-            "vertical": False
-        }
-    )
     plt.savefig(f"./images/{opt.experiment}/matches_{batches_done}.png")
     plt.close()
 
