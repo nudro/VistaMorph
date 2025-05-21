@@ -690,6 +690,24 @@ def global_disc_loss(real_A, real_B, fake_img, mode):
 
     return loss_D
 
+def get_perceptual_weight(epoch, max_epochs=210, warmup_epochs=50):
+    """
+    Calculate the weight for perceptual loss with warmup and sigmoid-based softening.
+    Args:
+        epoch: Current epoch
+        max_epochs: Total number of epochs
+        warmup_epochs: Number of epochs for warmup period
+    Returns:
+        weight: Float between 0 and 0.8
+    """
+    if epoch < warmup_epochs:
+        # Linear increase from 0 to 1 during warmup
+        return epoch / warmup_epochs
+    else:
+        # Sigmoid function that smoothly approaches 0.8
+        x = (epoch - warmup_epochs) / (max_epochs - warmup_epochs)
+        return 0.8 * (1 / (1 + math.exp(-5 * (x - 0.5))))
+
 def find_common_matches(points1, points2, threshold=20.0):
     """
     Find common matches between two sets of keypoints based on Euclidean distance.
@@ -991,7 +1009,8 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
             # perceptual loss, LPIPS
             perc_A = criterion_lpips(fake_B, warped_B)
-            perc_loss = perc_A.mean()
+            perc_weight = get_perceptual_weight(epoch, opt.n_epochs)
+            perc_loss = perc_A.mean() * perc_weight
 
             # Replace tie_error with LoFTR feature loss
             #loftr_loss = loftr_feature_loss(warped_B2, real_A, epoch, max_epochs=opt.n_epochs)
