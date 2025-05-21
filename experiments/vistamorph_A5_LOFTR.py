@@ -25,6 +25,7 @@ from lpips import LPIPS
 from kornia import morphology as morph
 import kornia.contrib as K
 import matplotlib.pyplot as plt
+from kornia_moons.viz import draw_LAF_matches
 
 
 parser = argparse.ArgumentParser()
@@ -226,7 +227,6 @@ def sample_images(batches_done):
     warped_B, theta = model(img_A=real_A, img_B=fake_A, src=real_B)
     fake_A2 = generator2(warped_B)
 
-    """
     # Get LoFTR features and visualize for original pair
     original_features = visualize_loftr_features(
         real_A, real_B,
@@ -244,10 +244,49 @@ def sample_images(batches_done):
     # Print feature statistics
     print(f"Original pair features: {len(original_features['keypoints0'])} matches")
     print(f"Warped pair features: {len(warped_features['keypoints0'])} matches")
-    """
     
+    # Save the regular image comparison
     img_sample_global = torch.cat((real_A.data, real_B.data, fake_A2.data, warped_B.data, fake_A.data), -1)
     save_image(img_sample_global, "./images/%s/%s.png" % (opt.experiment, batches_done), nrow=4, normalize=True)
+    
+    # Create and save match visualization using Kornia's tools
+    mkpts0 = original_features['keypoints0']
+    mkpts1 = original_features['keypoints1']
+    
+    # Convert to LAF format for visualization
+    laf0 = KF.laf_from_center_scale_ori(
+        mkpts0.view(1, -1, 2),
+        torch.ones(mkpts0.shape[0]).view(1, -1, 1, 1),
+        torch.ones(mkpts0.shape[0]).view(1, -1, 1)
+    )
+    
+    laf1 = KF.laf_from_center_scale_ori(
+        mkpts1.view(1, -1, 2),
+        torch.ones(mkpts1.shape[0]).view(1, -1, 1, 1),
+        torch.ones(mkpts1.shape[0]).view(1, -1, 1)
+    )
+    
+    # Create indices for matches
+    idx = torch.arange(mkpts0.shape[0]).view(-1, 1).repeat(1, 2)
+    
+    # Draw matches
+    plt.figure(figsize=(12, 6))
+    draw_LAF_matches(
+        laf0,
+        laf1,
+        idx,
+        K.tensor_to_image(real_A),
+        K.tensor_to_image(real_B),
+        torch.ones(mkpts0.shape[0], dtype=torch.bool),  # All matches are considered inliers
+        draw_dict={
+            "inlier_color": (0.2, 1, 0.2),
+            "tentative_color": (1.0, 0.5, 1),
+            "feature_color": (0.2, 0.5, 1),
+            "vertical": False
+        }
+    )
+    plt.savefig(f"./images/{opt.experiment}/matches_{batches_done}.png")
+    plt.close()
 
 
 
@@ -569,6 +608,39 @@ def global_disc_loss(real_A, real_B, fake_img, mode):
 
     return loss_D
 
+def find_common_matches(points1, points2, threshold=20.0):
+    """
+    Find common matches between two sets of keypoints based on Euclidean distance.
+    Args:
+        points1: First set of keypoints [N, 2]
+        points2: Second set of keypoints [M, 2]
+        threshold: Maximum distance to consider points as matching
+    Returns:
+        indices1: Indices of matching points in points1
+        indices2: Indices of matching points in points2
+    """
+    # Calculate pairwise distances
+    dist_matrix = torch.cdist(points1, points2)
+    
+    # Find minimum distance for each point in points1
+    min_dist1, idx2 = torch.min(dist_matrix, dim=1)
+    
+    # Find minimum distance for each point in points2
+    min_dist2, idx1 = torch.min(dist_matrix, dim=0)
+    
+    # Find points that are mutual nearest neighbors
+    mutual_matches = []
+    for i in range(len(points1)):
+        j = idx2[i]
+        if idx1[j] == i and min_dist1[i] < threshold and min_dist2[j] < threshold:
+            mutual_matches.append((i, j))
+    
+    if not mutual_matches:
+        return None, None
+    
+    indices1, indices2 = zip(*mutual_matches)
+    return torch.tensor(indices1, device=points1.device), torch.tensor(indices2, device=points2.device)
+
 def loftr_feature_loss(img1, img2, epoch, max_epochs=210, min_matches=5, confidence_threshold=0.2):
     """
     Calculate LoFTR feature loss between two images with warm-up and fallback mechanisms.
@@ -637,36 +709,26 @@ def loftr_feature_loss(img1, img2, epoch, max_epochs=210, min_matches=5, confide
     mkpts1_backward = mkpts1_backward[backward_mask]
     conf_backward = conf_backward[backward_mask]
 
-    print("----")
-    print(mkpts0_forward.shape)
-    print(mkpts0_backward.shape)
-    print(mkpts0_forward)
-    print(mkpts0_backward)
-
-    print("Matches")
-    matches = mkpts0_forward[(mkpts0_forward.unsqueeze(1) == mkpts0_backward).any(dim=1)]
-    print(matches)
+    # Find common matches between forward and backward directions
+    indices_forward, indices_backward = find_common_matches(mkpts0_forward, mkpts1_forward)
     
-
-    """
-    # Have to take the minimum of the two 
-torch.Size([5, 2])
-torch.Size([7, 2])
------
-torch.Size([5])
-torch.Size([7])
-
-    """
+    if indices_forward is None or len(indices_forward) < min_matches:
+        # Fallback to L1 loss if not enough common matches
+        return criterion_L1(img1, img2)
     
+    # Use only common matches
+    mkpts0_forward = mkpts0_forward[indices_forward]
+    mkpts1_forward = mkpts1_forward[indices_forward]
+    conf_forward = conf_forward[indices_forward]
+    
+    mkpts0_backward = mkpts0_backward[indices_backward]
+    mkpts1_backward = mkpts1_backward[indices_backward]
+    conf_backward = conf_backward[indices_backward]
+
     # 1. Mean Euclidean Distance (MED)
     dist_forward = torch.norm(mkpts0_forward - mkpts1_forward, dim=1)
     dist_backward = torch.norm(mkpts0_backward - mkpts1_backward, dim=1)
     med_loss = (dist_forward.mean() + dist_backward.mean()) / 2
-
-    print("-----")
-    print(dist_forward.size())
-    print(dist_backward.size())
-    print("-----")
     
     # 2. Symmetric Transfer Error
     sym_error = torch.abs(dist_forward - dist_backward).mean()
