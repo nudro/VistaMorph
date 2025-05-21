@@ -269,6 +269,11 @@ def sample_images(batches_done):
     # Create indices for matches
     idx = torch.arange(mkpts0.shape[0], device='cuda').view(-1, 1).repeat(1, 2)  # Ensure on GPU
     
+    # Move all tensors to CPU before visualization
+    laf0 = laf0.cpu()
+    laf1 = laf1.cpu()
+    idx = idx.cpu()
+    
     # Draw matches
     plt.figure(figsize=(12, 6))
     draw_LAF_matches(
