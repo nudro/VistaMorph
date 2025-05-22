@@ -222,16 +222,11 @@ def sample_images(batches_done):
     real_A = Variable(imgs["A"].type(HalfTensor)) # torch.Size([1, 3, 256, 256])
     real_B = Variable(imgs["B"].type(HalfTensor))
   
-    # Cast real_A and real_B into a set of canny edges or laplacaian edges
-    edge_A, edge_B = edge_detection(real_A), edge_detection(real_B)
-    print("edge_A:", edge_A.shape)
-    edge_A = edge_A.expand(-1, 3, -1, -1)
-    print("edge_A:", edge_A.shape)
-            
-    fake_A = generator2(real_B)
-    fake_B = generator1(edge_A)
-    #warped_B, theta = model(img_A=fake_A, img_B=real_A, src=real_B)  
-    warped_B, theta = model(img_A=real_A, img_B=edge_A, src=real_B)  
+    mask_A = create_binary_mask(real_A).expand(-1, 3, -1, -1)
+    mask_B = create_binary_mask(real_B).expand(-1, 3, -1, -1)
+    fake_A = generator2(mask_B)
+    fake_B = generator1(mask_A)
+    warped_B, theta = model(img_A=fake_A, img_B=fake_B, src=real_B)  
 
     """
 
@@ -1013,67 +1008,23 @@ test_dataloader = DataLoader(
     num_workers=1,
 )
 
-def affine_to_tiepoints(theta, img_size=(256, 256)):
+def create_binary_mask(img, threshold=0.0):
     """
-    Convert affine transformation matrix to tiepoints.
-    Args:
-        theta: Affine transformation matrix [B, 2, 3] or [2, 3]
-        img_size: Tuple of (height, width) of the image
-    Returns:
-        source_points: Source points in the original image [B, 4, 2]
-        target_points: Target points after transformation [B, 4, 2]
-
-    pred_source, pred_target = affine_to_tiepoints(theta.view(-1, 2, 3))
-    gt_source, gt_target = affine_to_tiepoints(Y.view(-1, 2, 3))
-    """
-    #print("--------AFFINE TO TIEPOINTS---------")
-    #print(theta)
-    #print(".......")
-    if len(theta.shape) == 2:
-        theta = theta.unsqueeze(0)  # Add batch dimension if not present
-    
-    batch_size = theta.shape[0]
-    h, w = img_size
-    
-    # Define corner points of the image
-    corners = torch.tensor([
-        [0, 0],      # top-left
-        [w-1, 0],    # top-right
-        [w-1, h-1],  # bottom-right
-        [0, h-1]     # bottom-left
-    ], dtype=theta.dtype, device=theta.device)
-    
-    # Expand corners for batch processing
-    source_points = corners.unsqueeze(0).repeat(batch_size, 1, 1)
-    
-    # Convert corners to homogeneous coordinates
-    ones = torch.ones((batch_size, 4, 1), dtype=theta.dtype, device=theta.device)
-    source_points_h = torch.cat([source_points, ones], dim=2)
-    
-    # Apply transformation
-    target_points = torch.bmm(source_points_h, theta.transpose(1, 2))
-    
-    return source_points, target_points
-
-def edge_detection(img):
-    """Extract edges from image using combined Canny and Laplacian operators.
+    Create a binary mask from an image tensor.
     Args:
         img (torch.Tensor): Input image tensor [B, C, H, W]
+        threshold (float): Threshold value (default: 0.0)
     Returns:
-        torch.Tensor: Combined edge map [B, 1, H, W]
+        torch.Tensor: Binary mask [B, 1, H, W]
     """
-    # Convert to grayscale
-    gray = kornia.color.rgb_to_grayscale(img).type(torch.cuda.FloatTensor)
-    
-    # Canny edge detection
-    canny = kornia.filters.canny(gray.type(torch.cuda.FloatTensor), low_threshold=0.1, high_threshold=0.3)[0]
-    
-    # Laplacian edge detection
-    laplacian = kornia.filters.laplacian(gray, kernel_size=3)
-    
-    # Combine and normalize
-    return torch.clamp(canny + laplacian, 0, 1)
-    
+    # Convert to grayscale if needed
+    if img.size(1) > 1:
+        gray = kornia.color.rgb_to_grayscale(img)
+    else:
+        gray = img
+    mask = (gray > threshold).float()
+    return mask
+
 ##############################
 #       Training
 ##############################
@@ -1111,13 +1062,16 @@ for epoch in range(opt.epoch, opt.n_epochs):
         optimizer_G.zero_grad()
         print("+ + + optimizer_G.zero_grad() + + + ")
         with autocast():         
+            # Create binary masks for real_A and real_B
+            mask_A = create_binary_mask(real_A).expand(-1, 3, -1, -1)
+            mask_B = create_binary_mask(real_B).expand(-1, 3, -1, -1)
             # Cast real_A and real_B into a set of canny edges or laplacaian edges
-            edge_A, edge_B = edge_detection(real_A), edge_detection(real_B)
+            # edge_A, edge_B = edge_detection(real_A), edge_detection(real_B)
             
-            fake_A = generator2(real_B)
-            fake_B = generator1(edge_A.expand(-1, 3, -1, -1))
+            fake_A = generator2(mask_B)
+            fake_B = generator1(mask_A)
             #warped_B, theta = model(img_A=fake_A, img_B=real_A, src=real_B)  
-            warped_B, theta = model(img_A=real_A, img_B=edge_A.expand(-1, 3, -1, -1), src=real_B)  
+            warped_B, theta = model(img_A=fake_A, img_B=fake_B, src=real_B)  
 
             # min recon loss
             recon_loss = global_pixel_loss(fake_B, warped_B)
