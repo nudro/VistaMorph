@@ -448,13 +448,11 @@ for epoch in range(opt.epoch, opt.n_epochs):
         print("+ + + optimizer_M.zero_grad() + + + ")
         with autocast():  
 
-            noise = torch.randn_like(real_A).cuda() 
+            noise = torch.randn_like(real_A) 
             timesteps = torch.randint(0, 999, (real_B.shape[0],)).long().cuda()
 
-            noisy_A = noise_scheduler.add_noise(real_A, Y, timesteps)
-
-            # Ensure Y is expanded to match the spatial dimensions of real_A
-            Y = Y.expand(-1, 3, -1, -1)  # Expand Y to match the number of channels in real_A
+            # Use noise instead of Y for add_noise
+            noisy_A = noise_scheduler.add_noise(real_A, noise, timesteps)
 
             # pred noise
             pred = Net(noisy_A, timesteps, Y).cuda()  # Use Y as labels
