@@ -346,7 +346,7 @@ load_clean_state(model, net_path)
 
 diff_path = "./saved_models/%s/diff_%d.pth" % (opt.experiment, opt.epoch)
 print(diff_path)
-load_clean_state(Diff, net_path)
+load_clean_state(Diff, diff_path)
 
 
 # Set to eval mode
