@@ -449,7 +449,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
         with autocast():  
 
             noise = torch.randn_like(real_A) 
-            timesteps = torch.randint(0, 2999, (real_B.shape[0],)).long().cuda()
+            timesteps = torch.randint(0, 2998, (real_B.shape[0],)).long().cuda()
 
             # Debug prints
             print("real_A shape:", real_A.shape)
