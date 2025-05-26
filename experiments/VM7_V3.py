@@ -454,7 +454,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
             noisy_A = noise_scheduler.add_noise(real_A, Y, timesteps)
 
             # pred noise
-            pred = Net(noisy_A, timesteps, labels).cuda()
+            pred = Net(noisy_A, timesteps, Y).cuda()
 
             # noise loss
             loss_noise = (loss_fn(pred, noise)).mean()
