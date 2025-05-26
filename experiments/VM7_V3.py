@@ -31,7 +31,7 @@ from diffusers import DDPMScheduler, UNet2DModel
 
 
 """
-V1 - 2 Stacked STNs with Grid Regularization
+V1 - 2 Stacked STNs with Grid Regularization and Diffusion Model
 Params: 
 Rs = F.grid_sample(src_tensors[j], rs_grid, mode='nearest', padding_mode='border', align_corners=False)
 NO GAN
