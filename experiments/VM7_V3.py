@@ -436,36 +436,45 @@ for epoch in range(opt.epoch, opt.n_epochs):
         real_B = Variable(batch["B"].type(HalfTensor)).cuda()
         Y = Variable(batch["Y"].type(HalfTensor)).cuda()  # Ground truth affine matrix
 
-        # Debug prints
-        print("real_A shape:", real_A.shape)
-        print("noise shape:", noise.shape)
-        print("Y shape:", Y.shape)
-        print("timesteps shape:", timesteps.shape)
+        # Reshape Y to match the number of channels in real_A
+        Y = Y.view(Y.size(0), 6, 1, 1)  # Reshape to (batch_size, 6, 1, 1)
+        Y = Y.expand(-1, 6, -1, -1)  # Expand Y to match the number of channels in real_A
 
-        # Use noise instead of Y for add_noise
-        noisy_A = noise_scheduler.add_noise(real_A, noise, timesteps)
+        # ------------------
+        #  Train Stacked STN
+        # ------------------
 
-        # No need to convert Y to long since we're using continuous values
-        pred = Diff(noisy_A, timesteps, Y)  # Pass Y directly
+        optimizer_M.zero_grad()
+        print("+ + + optimizer_M.zero_grad() + + + ")
+        with autocast():  
 
-        # noise loss
-        loss_noise = (loss_fn(pred, noise)).mean()
+            noise = torch.randn_like(real_A) 
+            timesteps = torch.randint(0, 999, (real_B.shape[0],)).long().cuda()
 
-        # STN
-        warped_B, theta = model(img_A=noisy_A, img_B=real_B, src=real_B) 
+            noisy_A = noise_scheduler.add_noise(real_A, Y, timesteps)
 
-        recon_loss = criterion_L1(warped_B, noisy_A) 
-        
-        # Convert theta to tiepoints and compare with ground truth
-        pred_source, pred_target = affine_to_tiepoints(theta.view(-1, 2, 3)) #theta
-        gt_source, gt_target = affine_to_tiepoints(Y.view(-1, 2, 3)) #Y
-        tie_loss = F.smooth_l1_loss(gt_target, pred_target)
+            # pred noise
+            pred = Net(noisy_A, timesteps, Y).cuda()  # Use Y as labels
 
-        # Total Loss
-        loss_M = tie_loss + recon_loss + loss_noise
+            # noise loss
+            loss_noise = (loss_fn(pred, noise)).mean()
 
+            # STN
+            warped_B, theta = model(img_A=noisy_A, img_B=real_B, src=real_B) 
+
+            recon_loss = criterion_L1(warped_B, noisy_A) 
+            
+            # Convert theta to tiepoints and compare with ground truth
+            pred_source, pred_target = affine_to_tiepoints(theta.view(-1, 2, 3)) #theta
+            gt_source, gt_target = affine_to_tiepoints(Y.view(-1, 2, 3)) #Y
+            tie_loss = F.smooth_l1_loss(gt_target, pred_target)
+
+            # Total Loss
+            loss_M = tie_loss + recon_loss + loss_noise
+    
         scaler.scale(loss_M).backward()
         scaler.step(optimizer_M)
+        print("+ + + optimizer_M.step() + + + ")
         scaler.update()
 
         # --------------
@@ -478,16 +487,16 @@ for epoch in range(opt.epoch, opt.n_epochs):
         prev_time = time.time()
 
         sys.stdout.write(
-            "\r[Epoch %d/%d] [Batch %d/%d] [M loss: %f] [R(L1): %f, Tie: %f] ETA: %s"
+            "\r[Epoch %d/%d] [Batch %d/%d] [M loss: %f] [R(L1): %f, Tie: %f, ] ETA: %s"
             % (
-                epoch,
-                opt.n_epochs,
-                i,
-                len(dataloader),
-                loss_M.item(),
+                epoch, #%d
+                opt.n_epochs, #%d
+                i, #%d
+                len(dataloader), #%d
+                loss_M.item(), #%f
                 recon_loss.item(),
                 tie_loss.item(),
-                time_left,
+                time_left, #%s
             )
         )
 
@@ -495,7 +504,8 @@ for epoch in range(opt.epoch, opt.n_epochs):
         if batches_done % opt.sample_interval == 0:
             sample_images(batches_done)
 
+
     if opt.checkpoint_interval != -1 and epoch % opt.checkpoint_interval == 0:
         # Save model checkpoints
         torch.save(model.state_dict(), "./saved_models/%s/stn_%d.pth" % (opt.experiment, epoch))
-        torch.save(Diff.state_dict(), "./saved_models/%s/diff_%d.pth" % (opt.experiment, epoch))
+        torch.save(Net.state_dict(), "/home/local/AD/cordun1/experiments/TF-Diff/saved_models/prototype/Net_%d.pth" % epoch)
