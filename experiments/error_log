@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "VM7_V3.py", line 454, in <module>
+    noisy_A = noise_scheduler.add_noise(real_A, Y, timesteps)
+  File "/home/cordun1/miniconda3/envs/vistamorph/lib/python3.8/site-packages/diffusers/schedulers/scheduling_ddpm.py", line 524, in add_noise
+    noisy_samples = sqrt_alpha_prod * original_samples + sqrt_one_minus_alpha_prod * noise
+RuntimeError: The size of tensor a (3) must match the size of tensor b (6) at non-singleton dimension 1
