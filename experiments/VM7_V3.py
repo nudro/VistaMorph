@@ -436,9 +436,9 @@ for epoch in range(opt.epoch, opt.n_epochs):
         real_B = Variable(batch["B"].type(HalfTensor)).cuda()
         Y = Variable(batch["Y"].type(HalfTensor)).cuda()  # Ground truth affine matrix
 
-        # Reshape Y to match spatial dimensions of real_A
+        # Reshape Y to match the number of channels in real_A
         Y = Y.view(Y.size(0), 6, 1, 1)  # Reshape to (batch_size, 6, 1, 1)
-        Y = Y.expand(-1, -1, real_A.size(2), real_A.size(3))  # Expand to match spatial dimensions of real_A
+        Y = Y.expand(-1, 3, -1, -1)  # Expand Y to match the number of channels in real_A
 
         # ------------------
         #  Train Stacked STN
