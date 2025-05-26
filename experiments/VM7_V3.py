@@ -451,6 +451,16 @@ for epoch in range(opt.epoch, opt.n_epochs):
             noise = torch.randn_like(real_A) 
             timesteps = torch.randint(0, 999, (real_B.shape[0],)).long().cuda()
 
+            # Debug prints
+            print("real_A shape:", real_A.shape)
+            print("noise shape:", noise.shape)
+            print("Y shape:", Y.shape)
+            print("timesteps shape:", timesteps.shape)
+
+            # Ensure noise has the same shape as real_A
+            if noise.shape != real_A.shape:
+                noise = noise.view(real_A.shape)
+
             # Use noise instead of Y for add_noise
             noisy_A = noise_scheduler.add_noise(real_A, noise, timesteps)
 
