@@ -133,10 +133,10 @@ def affine_to_tiepoints(theta, img_size=(256, 256)):
 
 def sample_images(batches_done):
     imgs = next(iter(test_dataloader)) # batch_size = 1
-    real_A = Variable(imgs["A"].type(HalfTensor)) # torch.Size([1, 3, 256, 256])
-    real_B = Variable(imgs["B"].type(HalfTensor))
+    real_A = Variable(imgs["A"].type(HalfTensor)).cuda() # torch.Size([1, 3, 256, 256])
+    real_B = Variable(imgs["B"].type(HalfTensor)).cuda()
     
-    noise = torch.randn_like(real_A) 
+    noise = torch.randn_like(real_A).cuda() 
     timesteps = torch.randint(0, 999, (real_B.shape[0],)).long().cuda()
     noisy_A = noise_scheduler.add_noise(real_A, noise, timesteps)
     warped_B, theta = model(img_A=noisy_A, img_B=real_B, src=real_B) 
@@ -432,9 +432,9 @@ scaler = GradScaler()
 
 for epoch in range(opt.epoch, opt.n_epochs):
     for i, batch in enumerate(dataloader):
-        real_A = Variable(batch["A"].type(HalfTensor))
-        real_B = Variable(batch["B"].type(HalfTensor))
-        Y = Variable(batch["Y"].type(HalfTensor))  # Ground truth affine matrix
+        real_A = Variable(batch["A"].type(HalfTensor)).cuda()
+        real_B = Variable(batch["B"].type(HalfTensor)).cuda()
+        Y = Variable(batch["Y"].type(HalfTensor)).cuda()  # Ground truth affine matrix
 
         # Reshape Y to match spatial dimensions of real_A
         Y = Y.view(Y.size(0), 1, 1, 1)  # Reshape to (batch_size, 1, 1, 1)
@@ -448,13 +448,13 @@ for epoch in range(opt.epoch, opt.n_epochs):
         print("+ + + optimizer_M.zero_grad() + + + ")
         with autocast():  
 
-            noise = torch.randn_like(real_A) 
+            noise = torch.randn_like(real_A).cuda() 
             timesteps = torch.randint(0, 999, (real_B.shape[0],)).long().cuda()
 
             noisy_A = noise_scheduler.add_noise(real_A, Y, timesteps)
 
             # pred noise
-            pred = Net(noisy_A, timesteps, labels)
+            pred = Net(noisy_A, timesteps, labels).cuda()
 
             # noise loss
             loss_noise = (loss_fn(pred, noise)).mean()
