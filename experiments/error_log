@@ -1,3 +1,9 @@
+Traceback (most recent call last):
+  File "VM7_V3.py", line 464, in <module>
+    pred = Net(noisy_A, timesteps, Y).cuda()  # Use Y as labels
+TypeError: __init__() takes 1 positional argument but 4 were given
+
+
 real_A shape: torch.Size([4, 3, 256, 256])
 noise shape: torch.Size([4, 3, 256, 256])
 Y shape: torch.Size([4, 6, 1, 1])
