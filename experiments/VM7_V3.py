@@ -438,7 +438,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
         # Reshape Y to match the number of channels in real_A
         Y = Y.view(Y.size(0), 6, 1, 1)  # Reshape to (batch_size, 6, 1, 1)
-        Y = Y.expand(-1, 3, -1, -1)  # Expand Y to match the number of channels in real_A
+        Y = Y.expand(-1, 6, -1, -1)  # Expand Y to match the number of channels in real_A
 
         # ------------------
         #  Train Stacked STN
