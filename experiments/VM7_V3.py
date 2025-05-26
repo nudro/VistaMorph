@@ -457,10 +457,6 @@ for epoch in range(opt.epoch, opt.n_epochs):
             print("Y shape:", Y.shape)
             print("timesteps shape:", timesteps.shape)
 
-            # Ensure noise has the same shape as real_A
-            if noise.shape != real_A.shape:
-                noise = noise.view(real_A.shape)
-
             # Use noise instead of Y for add_noise
             noisy_A = noise_scheduler.add_noise(real_A, noise, timesteps)
 
