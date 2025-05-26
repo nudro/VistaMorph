@@ -460,8 +460,11 @@ for epoch in range(opt.epoch, opt.n_epochs):
             # Use noise instead of Y for add_noise
             noisy_A = noise_scheduler.add_noise(real_A, noise, timesteps)
 
+            # Convert Y to Long tensor for embedding
+            Y_long = Y.long()  # Convert to Long tensor
+
             # pred noise - use the instance of Net
-            pred = Diff(noisy_A, timesteps, Y)  # Changed from Net to Diff
+            pred = Diff(noisy_A, timesteps, Y_long)  # Use Y_long instead of Y
 
             # noise loss
             loss_noise = (loss_fn(pred, noise)).mean()
