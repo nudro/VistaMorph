@@ -379,6 +379,8 @@ scaler = GradScaler()
 
 # Initialize accumulators for total loss and batch count
 total_loss = 0.0
+total_recon_loss = 0.0
+total_tie_loss = 0.0
 total_batches = 0
 
 for epoch in range(opt.epoch, opt.n_epochs):
@@ -418,6 +420,8 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
         # Accumulate total loss and batch count
         total_loss += loss_M.item()
+        total_recon_loss += recon_loss.item()
+        total_tie_loss += tie_loss.item()
         total_batches += 1
 
         # --------------
@@ -455,6 +459,10 @@ for epoch in range(opt.epoch, opt.n_epochs):
 # After all epochs are done, print the total average training loss
 if total_batches > 0:
     avg_loss = total_loss / total_batches
+    avg_recon_loss = total_recon_loss / total_batches
+    avg_tie_loss = total_tie_loss / total_batches
     print(f"\nTotal average training loss over all epochs: {avg_loss:.6f}")
+    print(f"Average reconstruction (L1) loss: {avg_recon_loss:.6f}")
+    print(f"Average tie loss: {avg_tie_loss:.6f}")
 else:
     print("\nNo batches were processed.")
