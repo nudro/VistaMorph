@@ -453,8 +453,11 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
             noisy_A = noise_scheduler.add_noise(real_A, Y, timesteps)
 
+            # Ensure Y is expanded to match the spatial dimensions of real_A
+            Y = Y.expand(-1, 3, -1, -1)  # Expand Y to match the number of channels in real_A
+
             # pred noise
-            pred = Net(noisy_A, timesteps, Y).cuda()
+            pred = Net(noisy_A, timesteps, Y).cuda()  # Use Y as labels
 
             # noise loss
             loss_noise = (loss_fn(pred, noise)).mean()
