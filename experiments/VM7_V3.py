@@ -430,12 +430,6 @@ noise_scheduler = DDPMScheduler(num_train_timesteps=1000, beta_schedule='squared
 # AMP
 scaler = GradScaler()
 
-# Initialize loss accumulators
-total_m_loss = 0
-total_recon_loss = 0
-total_tie_loss = 0
-num_batches = 0
-
 for epoch in range(opt.epoch, opt.n_epochs):
     for i, batch in enumerate(dataloader):
         real_A = Variable(batch["A"].type(HalfTensor)).cuda()
@@ -470,12 +464,6 @@ for epoch in range(opt.epoch, opt.n_epochs):
         # Total Loss
         loss_M = tie_loss + recon_loss + loss_noise
 
-        # Accumulate losses
-        total_m_loss += loss_M.item()
-        total_recon_loss += recon_loss.item()
-        total_tie_loss += tie_loss.item()
-        num_batches += 1
-
         scaler.scale(loss_M).backward()
         scaler.step(optimizer_M)
         scaler.update()
@@ -489,13 +477,8 @@ for epoch in range(opt.epoch, opt.n_epochs):
         time_left = datetime.timedelta(seconds=batches_left * (time.time() - prev_time))
         prev_time = time.time()
 
-        # Calculate average losses
-        avg_m_loss = total_m_loss / num_batches
-        avg_recon_loss = total_recon_loss / num_batches
-        avg_tie_loss = total_tie_loss / num_batches
-
         sys.stdout.write(
-            "\r[Epoch %d/%d] [Batch %d/%d] [M loss: %f] [R(L1): %f, Tie: %f] [Avg M: %f, Avg R: %f, Avg Tie: %f] ETA: %s"
+            "\r[Epoch %d/%d] [Batch %d/%d] [M loss: %f] [R(L1): %f, Tie: %f] ETA: %s"
             % (
                 epoch,
                 opt.n_epochs,
@@ -504,9 +487,6 @@ for epoch in range(opt.epoch, opt.n_epochs):
                 loss_M.item(),
                 recon_loss.item(),
                 tie_loss.item(),
-                avg_m_loss,
-                avg_recon_loss,
-                avg_tie_loss,
                 time_left,
             )
         )
@@ -514,12 +494,6 @@ for epoch in range(opt.epoch, opt.n_epochs):
         # If at sample interval save image
         if batches_done % opt.sample_interval == 0:
             sample_images(batches_done)
-
-    # Reset accumulators at the end of each epoch
-    total_m_loss = 0
-    total_recon_loss = 0
-    total_tie_loss = 0
-    num_batches = 0
 
     if opt.checkpoint_interval != -1 and epoch % opt.checkpoint_interval == 0:
         # Save model checkpoints
