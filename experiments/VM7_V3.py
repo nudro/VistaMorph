@@ -425,7 +425,7 @@ prev_time = time.time()
 f = open('./LOGS/{}.txt'.format(opt.experiment), 'a+')
 
 # Scheduler
-noise_scheduler = DDPMScheduler(num_train_timesteps=1000, beta_schedule='squaredcos_cap_v2')
+noise_scheduler = DDPMScheduler(num_train_timesteps=3000, beta_schedule='squaredcos_cap_v2')
 
 # AMP
 scaler = GradScaler()
@@ -449,7 +449,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
         with autocast():  
 
             noise = torch.randn_like(real_A) 
-            timesteps = torch.randint(0, 999, (real_B.shape[0],)).long().cuda()
+            timesteps = torch.randint(0, 2999, (real_B.shape[0],)).long().cuda()
 
             # Debug prints
             print("real_A shape:", real_A.shape)
