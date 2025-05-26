@@ -139,10 +139,11 @@ def sample_images(batches_done):
     noise = torch.randn_like(real_A).cuda() 
     timesteps = torch.randint(0, 999, (real_B.shape[0],)).long().cuda()
     noisy_A = noise_scheduler.add_noise(real_A, noise, timesteps)
+    pred = Diff(noisy_A, timesteps, Y)  # Get the denoised output
     warped_B, theta = model(img_A=noisy_A, img_B=real_B, src=real_B) 
 
     # Save the regular image comparison
-    img_sample_global = torch.cat((real_A.data, real_B.data, warped_B.data), -1)
+    img_sample_global = torch.cat((real_A.data, real_B.data, noisy_A.data, pred.data, warped_B.data), -1)
     save_image(img_sample_global, "./images/%s/%s.png" % (opt.experiment, batches_done), nrow=4, normalize=True)
 
 ##################
