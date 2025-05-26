@@ -1,6 +1,14 @@
+../aten/src/ATen/native/cuda/Indexing.cu:1239: indexSelectSmallIndex: block: [0,0,0], thread: [0,0,0] Assertion `srcIndex < srcSelectDimSize` failed.
+../aten/src/ATen/native/cuda/Indexing.cu:1239: indexSelectSmallIndex: block: [0,0,0], thread: [1,0,0] Assertion `srcIndex < srcSelectDimSize` failed.
+../aten/src/ATen/native/cuda/Indexing.cu:1239: indexSelectSmallIndex: block: [0,0,0], thread: [2,0,0] Assertion `srcIndex < srcSelectDimSize` failed.
+../aten/src/ATen/native/cuda/Indexing.cu:1239: indexSelectSmallIndex: block: [0,0,0], thread: [3,0,0] Assertion `srcIndex < srcSelectDimSize` failed.
+../aten/src/ATen/native/cuda/Indexing.cu:1239: indexSelectSmallIndex: block: [0,0,0], thread: [0,0,0] Assertion `srcIndex < srcSelectDimSize` failed.
+../aten/src/ATen/native/cuda/Indexing.cu:1239: indexSelectSmallIndex: block: [0,0,0], thread: [1,0,0] Assertion `srcIndex < srcSelectDimSize` failed.
+../aten/src/ATen/native/cuda/Indexing.cu:1239: indexSelectSmallIndex: block: [0,0,0], thread: [2,0,0] Assertion `srcIndex < srcSelectDimSize` failed.
+../aten/src/ATen/native/cuda/Indexing.cu:1239: indexSelectSmallIndex: block: [0,0,0], thread: [3,0,0] Assertion `srcIndex < srcSelectDimSize` failed.
 Traceback (most recent call last):
-  File "VM7_V3.py", line 464, in <module>
-    pred = Diff(noisy_A, timesteps, Y)  # Changed from Net to Diff
+  File "VM7_V3.py", line 467, in <module>
+    pred = Diff(noisy_A, timesteps, Y_long)  # Use Y_long instead of Y
   File "/home/cordun1/miniconda3/envs/vistamorph/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1518, in _wrapped_call_impl
     return self._call_impl(*args, **kwargs)
   File "/home/cordun1/miniconda3/envs/vistamorph/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1527, in _call_impl
@@ -21,14 +29,6 @@ Original Traceback (most recent call last):
     return self._call_impl(*args, **kwargs)
   File "/home/cordun1/miniconda3/envs/vistamorph/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1527, in _call_impl
     return forward_call(*args, **kwargs)
-  File "VM7_V3.py", line 181, in forward
-    class_cond = self.class_emb(class_labels) # Map to embedding dinemsion
-  File "/home/cordun1/miniconda3/envs/vistamorph/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1518, in _wrapped_call_impl
-    return self._call_impl(*args, **kwargs)
-  File "/home/cordun1/miniconda3/envs/vistamorph/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1527, in _call_impl
-    return forward_call(*args, **kwargs)
-  File "/home/cordun1/miniconda3/envs/vistamorph/lib/python3.8/site-packages/torch/nn/modules/sparse.py", line 162, in forward
-    return F.embedding(
-  File "/home/cordun1/miniconda3/envs/vistamorph/lib/python3.8/site-packages/torch/nn/functional.py", line 2233, in embedding
-    return torch.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
-RuntimeError: Expected tensor for argument #1 'indices' to have one of the following scalar types: Long, Int; but got torch.cuda.HalfTensor instead (while checking arguments for embedding)
+  File "VM7_V3.py", line 182, in forward
+    class_cond = class_cond.view(bs, class_cond.shape[2], 1, 1).expand(bs, class_cond.shape[2], w, h)
+RuntimeError: shape '[2, 1, 1, 1]' is invalid for input of size 48
