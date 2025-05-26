@@ -135,6 +135,7 @@ def sample_images(batches_done):
     imgs = next(iter(test_dataloader)) # batch_size = 1
     real_A = Variable(imgs["A"].type(HalfTensor)).cuda() # torch.Size([1, 3, 256, 256])
     real_B = Variable(imgs["B"].type(HalfTensor)).cuda()
+    Y = Variable(imgs["Y"].type(HalfTensor)).cuda()  # Get Y from the test dataloader
     
     noise = torch.randn_like(real_A).cuda() 
     timesteps = torch.randint(0, 999, (real_B.shape[0],)).long().cuda()
