@@ -31,10 +31,19 @@ from diffusers import DDPMScheduler, UNet2DModel
 
 
 """
-V3 - 2 Stacked STNs with Grid Regularization and Diffusion Model
+V3 - Option for Multiple Stacked STNs with Grid Regularization and Diffusion Model
 Params: 
 Rs = F.grid_sample(src_tensors[j], rs_grid, mode='nearest', padding_mode='border', align_corners=False)
 NO GAN
+
+The best model: 
+
+Total average training loss over all epochs: 15.349762
+Average reconstruction (L1) loss: 0.595422
+Average tie loss: 13.934805
+
+Was trained with 1 STN, only. 
+
 """
 
 
@@ -141,7 +150,7 @@ def sample_images(batches_done):
     timesteps = torch.randint(0, 999, (real_B.shape[0],)).long().cuda()
     noisy_A = noise_scheduler.add_noise(real_A, noise, timesteps)
     pred = Diff(noisy_A, timesteps, Y)  # Get the denoised output
-    warped_B, theta = model(img_A=noisy_A, img_B=real_B, src=real_B) 
+    warped_B, theta = model(img_A=noisy_A, img_B=pred, src=real_B) #img_B = real_B
 
     # Save the regular image comparison
     img_sample_global = torch.cat((real_A.data, real_B.data, noisy_A.data, pred.data, warped_B.data), -1)
@@ -368,7 +377,7 @@ class StackedSTN(nn.Module):
 input_shape_patch = (opt.channels, opt.img_height, opt.img_width)
 
 if cuda:
-    model = StackedSTN(num_stns=2).cuda() #<-------- STACK
+    model = StackedSTN(num_stns=1).cuda() #<-------- STACK; BEST MODEL, STN = 1
     criterion_L1.cuda()
     Diff = ClassConditionedUnet().cuda()
 
@@ -378,8 +387,10 @@ Diff = torch.nn.DataParallel(Diff, device_ids=[0,1])
 
 if opt.epoch != 0:
     model.load_state_dict(torch.load("./saved_models/%s/stn_%d.pth" % (opt.experiment, opt.epoch)))
+    Diff.load_state_dict(torch.load("./saved_models/%s/diff_%d.pth" % (opt.experiment, opt.epoch)))
 else:
     model.apply(weights_init_normal)
+    Diff.apply(weights_init_normal)
 
 # Optimizers - Jointly train diffusion and STN
 optimizer_M = torch.optim.Adam(itertools.chain(model.parameters(), Diff.parameters()), lr=opt.lr, betas=(opt.b1, opt.b2))
@@ -427,10 +438,17 @@ prev_time = time.time()
 f = open('./LOGS/{}.txt'.format(opt.experiment), 'a+')
 
 # Scheduler
-noise_scheduler = DDPMScheduler(num_train_timesteps=1000, beta_schedule='squaredcos_cap_v2')
+noise_scheduler = DDPMScheduler(num_train_timesteps=2000, beta_schedule='squaredcos_cap_v2')
 
 # AMP
 scaler = GradScaler()
+
+# Initialize accumulators for total loss and batch count
+total_loss = 0.0
+total_recon_loss = 0.0
+total_tie_loss = 0.0
+total_batches = 0
+
 
 for epoch in range(opt.epoch, opt.n_epochs):
     for i, batch in enumerate(dataloader):
@@ -450,8 +468,8 @@ for epoch in range(opt.epoch, opt.n_epochs):
         print("+ + + optimizer_M.zero_grad() + + + ")
         with autocast():  
 
-            noise = torch.randn_like(real_A) 
-            timesteps = torch.randint(0, 999, (real_B.shape[0],)).long().cuda()
+            noise = torch.randn_like(real_A) #real_A
+            timesteps = torch.randint(0, 1999, (real_B.shape[0],)).long().cuda()
 
             # Debug prints
             print("real_A shape:", real_A.shape)
@@ -469,9 +487,9 @@ for epoch in range(opt.epoch, opt.n_epochs):
             loss_noise = (loss_fn(pred, noise)).mean()
 
             # STN
-            warped_B, theta = model(img_A=noisy_A, img_B=real_B, src=real_B) 
+            warped_B, theta = model(img_A=noisy_A, img_B=pred, src=real_B) # img_B=real_B
 
-            recon_loss = criterion_L1(warped_B, noisy_A) 
+            recon_loss = criterion_L1(warped_B, pred) #noisy_A
             
             # Convert theta to tiepoints and compare with ground truth
             pred_source, pred_target = affine_to_tiepoints(theta.view(-1, 2, 3)) #theta
@@ -485,6 +503,12 @@ for epoch in range(opt.epoch, opt.n_epochs):
         scaler.step(optimizer_M)
         print("+ + + optimizer_M.step() + + + ")
         scaler.update()
+
+        # Accumulate total loss and batch count
+        total_loss += loss_M.item()
+        total_recon_loss += recon_loss.item()
+        total_tie_loss += tie_loss.item()
+        total_batches += 1
 
         # --------------
         #  Log Progress
@@ -517,4 +541,15 @@ for epoch in range(opt.epoch, opt.n_epochs):
     if opt.checkpoint_interval != -1 and epoch % opt.checkpoint_interval == 0:
         # Save model checkpoints
         torch.save(model.state_dict(), "./saved_models/%s/stn_%d.pth" % (opt.experiment, epoch))
-        torch.save(Net.state_dict(), "/home/local/AD/cordun1/experiments/TF-Diff/saved_models/prototype/Net_%d.pth" % epoch)
+        torch.save(Diff.state_dict(), "./saved_models/%s/diff_%d.pth" % (opt.experiment, epoch))
+
+# After all epochs are done, print the total average training loss
+if total_batches > 0:
+    avg_loss = total_loss / total_batches
+    avg_recon_loss = total_recon_loss / total_batches
+    avg_tie_loss = total_tie_loss / total_batches
+    print(f"\nTotal average training loss over all epochs: {avg_loss:.6f}")
+    print(f"Average reconstruction (L1) loss: {avg_recon_loss:.6f}")
+    print(f"Average tie loss: {avg_tie_loss:.6f}")
+else:
+    print("\nNo batches were processed.")
