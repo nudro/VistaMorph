@@ -1,11 +1,33 @@
-Traceback (most recent call last):
-  File "VM7_V3.py", line 467, in <module>
-    noisy_A = noise_scheduler.add_noise(real_A, noise, timesteps)
-  File "/home/cordun1/miniconda3/envs/vistamorph/lib/python3.8/site-packages/diffusers/schedulers/scheduling_ddpm.py", line 514, in add_noise
-    sqrt_alpha_prod = alphas_cumprod[timesteps] ** 0.5
-  File "/home/cordun1/miniconda3/envs/vistamorph/lib/python3.8/site-packages/torch/_tensor.py", line 40, in wrapped
-    return f(*args, **kwargs)
-RuntimeError: CUDA error: device-side assert triggered
-CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
-For debugging consider passing CUDA_LAUNCH_BLOCKING=1.
-Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+  File "VM7_V3.py", line 513, in <module>
+    sample_images(batches_done)
+  File "VM7_V3.py", line 142, in sample_images
+    pred = Diff(noisy_A, timesteps, Y)  # Get the denoised output
+  File "/home/cordun1/miniconda3/envs/vistamorph/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1518, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cordun1/miniconda3/envs/vistamorph/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1527, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cordun1/miniconda3/envs/vistamorph/lib/python3.8/site-packages/torch/nn/parallel/data_parallel.py", line 185, in forward
+    outputs = self.parallel_apply(replicas, inputs, module_kwargs)
+  File "/home/cordun1/miniconda3/envs/vistamorph/lib/python3.8/site-packages/torch/nn/parallel/data_parallel.py", line 200, in parallel_apply
+    return parallel_apply(replicas, inputs, kwargs, self.device_ids[:len(replicas)])
+  File "/home/cordun1/miniconda3/envs/vistamorph/lib/python3.8/site-packages/torch/nn/parallel/parallel_apply.py", line 110, in parallel_apply
+    output.reraise()
+  File "/home/cordun1/miniconda3/envs/vistamorph/lib/python3.8/site-packages/torch/_utils.py", line 694, in reraise
+    raise exception
+RuntimeError: Caught RuntimeError in replica 0 on device 0.
+Original Traceback (most recent call last):
+  File "/home/cordun1/miniconda3/envs/vistamorph/lib/python3.8/site-packages/torch/nn/parallel/parallel_apply.py", line 85, in _worker
+    output = module(*input, **kwargs)
+  File "/home/cordun1/miniconda3/envs/vistamorph/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1518, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cordun1/miniconda3/envs/vistamorph/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1527, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "VM7_V3.py", line 182, in forward
+    class_cond = self.class_cond(class_labels.view(bs, -1))  # Reshape to [batch_size, 6]
+  File "/home/cordun1/miniconda3/envs/vistamorph/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1518, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cordun1/miniconda3/envs/vistamorph/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1527, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cordun1/miniconda3/envs/vistamorph/lib/python3.8/site-packages/torch/nn/modules/linear.py", line 114, in forward
+    return F.linear(input, self.weight, self.bias)
+RuntimeError: mat1 and mat2 shapes cannot be multiplied (1x12 and 6x4)
