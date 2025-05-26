@@ -377,6 +377,10 @@ f = open('./LOGS/{}.txt'.format(opt.experiment), 'a+')
 # AMP
 scaler = GradScaler()
 
+# Initialize accumulators for total loss and batch count
+total_loss = 0.0
+total_batches = 0
+
 for epoch in range(opt.epoch, opt.n_epochs):
     for i, batch in enumerate(dataloader):
         real_A = Variable(batch["A"].type(HalfTensor))
@@ -412,6 +416,10 @@ for epoch in range(opt.epoch, opt.n_epochs):
         print("+ + + optimizer_M.step() + + + ")
         scaler.update()
 
+        # Accumulate total loss and batch count
+        total_loss += loss_M.item()
+        total_batches += 1
+
         # --------------
         #  Log Progress
         # --------------
@@ -443,3 +451,10 @@ for epoch in range(opt.epoch, opt.n_epochs):
     if opt.checkpoint_interval != -1 and epoch % opt.checkpoint_interval == 0:
         # Save model checkpoints
         torch.save(model.state_dict(), "./saved_models/%s/stn_%d.pth" % (opt.experiment, epoch))
+
+# After all epochs are done, print the total average training loss
+if total_batches > 0:
+    avg_loss = total_loss / total_batches
+    print(f"\nTotal average training loss over all epochs: {avg_loss:.6f}")
+else:
+    print("\nNo batches were processed.")
