@@ -137,7 +137,7 @@ def sample_images(batches_done):
     real_B = Variable(imgs["B"].type(HalfTensor))
     
     noise = torch.randn_like(real_A) 
-    timesteps = torch.randint(0, 999, (real_B.shape[0],)).long().to(device)
+    timesteps = torch.randint(0, 999, (real_B.shape[0],)).long().cuda()
     noisy_A = noise_scheduler.add_noise(real_A, noise, timesteps)
     warped_B, theta = model(img_A=noisy_A, img_B=real_B, src=real_B) 
 
@@ -435,6 +435,10 @@ for epoch in range(opt.epoch, opt.n_epochs):
         real_A = Variable(batch["A"].type(HalfTensor))
         real_B = Variable(batch["B"].type(HalfTensor))
         Y = Variable(batch["Y"].type(HalfTensor))  # Ground truth affine matrix
+
+        # Reshape Y to match spatial dimensions of real_A
+        Y = Y.view(Y.size(0), 1, 1, 1)  # Reshape to (batch_size, 1, 1, 1)
+        Y = Y.expand(-1, -1, real_A.size(2), real_A.size(3))  # Expand to match spatial dimensions of real_A
 
         # ------------------
         #  Train Stacked STN
