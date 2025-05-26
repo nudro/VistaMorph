@@ -152,16 +152,15 @@ class ClassConditionedUnet(nn.Module):
     
     def __init__(self, num_classes=4, class_emb_size=4):
         super().__init__()
-        # The embedding layer will map the class label to a vector of size class_emb_size
-        self.class_emb = nn.Embedding(num_classes, class_emb_size)
+        # Replace embedding with a linear layer for continuous values
+        self.class_cond = nn.Linear(6, class_emb_size)  # 6 for affine matrix values
 
-        # Self.model is an unconditional UNet with extra input channels to accept the conditioning information (the class embedding)
-        # Note: that a time-embedding is already built into this model 
+        # Self.model is an unconditional UNet with extra input channels to accept the conditioning information
         self.model = UNet2DModel(
             sample_size=128,            # the target image resolution
             in_channels=3 + class_emb_size, # Additional input channels for class cond.
             out_channels=3,           # the number of output channels
-            layers_per_block=1,       # how many ResNet layers to use per UNet block, changed from 2
+            layers_per_block=1,       # how many ResNet layers to use per UNet block
             block_out_channels=(32, 64, 64), # More channels -> more parameters
             down_block_types=( 
                 "DownBlock2D",        # a regular ResNet downsampling block
@@ -178,10 +177,11 @@ class ClassConditionedUnet(nn.Module):
     def forward(self, x, t, class_labels):
         with autocast(): 
             bs, ch, w, h = x.shape  
-            class_cond = self.class_emb(class_labels) # Map to embedding dinemsion
-            class_cond = class_cond.view(bs, class_cond.shape[2], 1, 1).expand(bs, class_cond.shape[2], w, h)
-            net_input = torch.cat((x, class_cond), 1) # torch.Size([4, 3, 128, 128])          
-            output = (self.model(net_input, t).sample) # (bs, 1, 28, 28)
+            # Process continuous values through linear layer
+            class_cond = self.class_cond(class_labels.view(bs, -1))  # Reshape to [batch_size, 6]
+            class_cond = class_cond.view(bs, -1, 1, 1).expand(bs, -1, w, h)
+            net_input = torch.cat((x, class_cond), 1)          
+            output = (self.model(net_input, t).sample)
     
         return output
 
@@ -460,11 +460,8 @@ for epoch in range(opt.epoch, opt.n_epochs):
             # Use noise instead of Y for add_noise
             noisy_A = noise_scheduler.add_noise(real_A, noise, timesteps)
 
-            # Convert Y to Long tensor for embedding
-            Y_long = Y.long()  # Convert to Long tensor
-
-            # pred noise - use the instance of Net
-            pred = Diff(noisy_A, timesteps, Y_long)  # Use Y_long instead of Y
+            # No need to convert Y to long since we're using continuous values
+            pred = Diff(noisy_A, timesteps, Y)  # Pass Y directly
 
             # noise loss
             loss_noise = (loss_fn(pred, noise)).mean()
