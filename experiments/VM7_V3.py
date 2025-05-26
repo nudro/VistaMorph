@@ -437,7 +437,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
         Y = Variable(batch["Y"].type(HalfTensor)).cuda()  # Ground truth affine matrix
 
         # Reshape Y to match spatial dimensions of real_A
-        Y = Y.view(Y.size(0), 1, 1, 1)  # Reshape to (batch_size, 1, 1, 1)
+        Y = Y.view(Y.size(0), 6, 1, 1)  # Reshape to (batch_size, 6, 1, 1)
         Y = Y.expand(-1, -1, real_A.size(2), real_A.size(3))  # Expand to match spatial dimensions of real_A
 
         # ------------------
