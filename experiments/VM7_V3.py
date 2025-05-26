@@ -451,10 +451,17 @@ for epoch in range(opt.epoch, opt.n_epochs):
             noise = torch.randn_like(real_A) 
             timesteps = torch.randint(0, 999, (real_B.shape[0],)).long().cuda()
 
-            noisy_A = noise_scheduler.add_noise(real_A, Y, timesteps)
+            # Debug prints
+            print("real_A shape:", real_A.shape)
+            print("noise shape:", noise.shape)
+            print("Y shape:", Y.shape)
+            print("timesteps shape:", timesteps.shape)
 
-            # pred noise
-            pred = Net(noisy_A, timesteps, Y).cuda()  # Use Y as labels
+            # Use noise instead of Y for add_noise
+            noisy_A = noise_scheduler.add_noise(real_A, noise, timesteps)
+
+            # No need to convert Y to long since we're using continuous values
+            pred = Diff(noisy_A, timesteps, Y)  # Pass Y directly
 
             # noise loss
             loss_noise = (loss_fn(pred, noise)).mean()
